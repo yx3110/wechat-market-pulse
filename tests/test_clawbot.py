@@ -2,6 +2,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -93,7 +94,8 @@ class ClawbotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unpad.update(padded) + unpad.finalize(), self.path.read_bytes())
         self.assertEqual(image["mid_size"], len(self.requests[2].content))
         self.assertNotIn("authorization", self.requests[2].headers)
-        self.assertEqual(self.client.session_path.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(self.client.session_path.stat().st_mode & 0o777, 0o600)
 
     async def test_modified_report_stops_before_network(self):
         with self.assertRaises(ValueError):
@@ -167,7 +169,8 @@ class ClawbotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.url.params["bot_type"], "3")
         self.assertNotIn("Authorization", request.headers)
         self.assertNotIn("base_info", json.loads(request.content))
-        self.assertEqual(Path(result["qr_path"]).stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(Path(result["qr_path"]).stat().st_mode & 0o777, 0o600)
 
     def test_only_ilink_and_official_cdn_hosts(self):
         self.assertTrue(checked_url("https://ilinkai2.weixin.qq.com/ilink/bot/sendmessage"))
@@ -193,7 +196,8 @@ class ClawbotTests(unittest.IsolatedAsyncioTestCase):
             test.assertEqual(args[args.index("--retry") + 1], "0")
             source = Path(args[args.index("--data-binary") + 1][1:])
             test.assertEqual(source.read_bytes(), b"encrypted-data")
-            test.assertEqual(source.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                test.assertEqual(source.stat().st_mode & 0o777, 0o600)
             head = Path(args[args.index("--dump-header") + 1])
 
             class Proc:

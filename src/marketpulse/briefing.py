@@ -20,7 +20,7 @@ from .media import resolve_images
 
 VERSION = "holistic-vision-v1"
 CONTEXT_VISION_VERSION = "holistic-context-images-v2"
-BRIEF_VERSION = "holistic-portable-v4"
+BRIEF_VERSION = "holistic-portable-v5"
 
 ADVICE_REFERENCES = [
     {
@@ -324,8 +324,10 @@ def analyze_images(media, records, cache_dir, cfg, progress=print):
     return sorted(results, key=lambda r: r["image_id"])
 
 
-def validate_brief(data, sources, visuals):
+def validate_brief(data, sources, visuals, groups=None):
     brief = Brief.model_validate(data)
+    if groups and len(groups) > 1 and not brief.group_comparison:
+        raise ValueError("多群报告缺少群间对照，未发布；请换模型或使用规则回退")
     known_images = {v["image_id"]: v for v in visuals}
     known = set(sources) | {iid for iid, v in known_images.items() if not v.get("excluded_from_analysis")}
     for item in [
@@ -473,7 +475,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
                 cfg,
                 timeout=cfg.get("model_timeout", 360),
             )
-            validate_brief(data, sources, visuals)
+            validate_brief(data, sources, visuals, groups)
         except (RuntimeError, ValueError):
             if not cfg.get("fallback_rules"):
                 raise
@@ -484,7 +486,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
             data["limitations"].insert(0, "配置的模型未完成，本次按已启用的 fallback_rules 回退到本地规则模式。")
             method = "rules-fallback"
     save_json(work / "briefing-candidate.json", data)
-    content = validate_brief(data, sources, visuals)
+    content = validate_brief(data, sources, visuals, groups)
     result = {
         "version": BRIEF_VERSION,
         "input_fingerprint": fingerprint,

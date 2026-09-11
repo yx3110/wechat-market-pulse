@@ -301,3 +301,17 @@ def test_invalid_model_evidence_can_explicitly_fallback_to_rules(tmp_path):
         )
     assert result["analysis_method"] == "rules-fallback"
     assert any("此前模型尝试" in text for text in result["content"]["limitations"])
+
+
+def test_multi_group_report_cannot_silently_omit_comparison(tmp_path):
+    from marketpulse.briefing import validate_brief
+    import pytest
+
+    source = tmp_path / "input.jsonl"
+    source.write_text("".join(json.dumps(r) + "\n" for r in records()), encoding="utf-8")
+    result, _ = generate(
+        "2026-01-05", [], dict(provider="rules", input=str(source)), tmp_path / "out", work_dir=tmp_path / "work"
+    )
+    result["content"]["group_comparison"] = []
+    with pytest.raises(ValueError, match="群间对照"):
+        validate_brief(result["content"], result["sources"], result["visuals"], result["groups"])
