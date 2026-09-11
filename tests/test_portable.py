@@ -304,6 +304,15 @@ def test_invalid_model_evidence_can_explicitly_fallback_to_rules(tmp_path):
         )
     assert result["analysis_method"] == "rules-fallback"
     assert any("此前模型尝试" in text for text in result["content"]["limitations"])
+    with patch("marketpulse.briefing.call_model", return_value=original["content"]) as model:
+        recovered, _ = generate(
+            "2026-01-05",
+            [],
+            cfg | dict(provider="ollama", model="test", fallback_rules=True),
+            tmp_path / "second",
+            work_dir=tmp_path / "work",
+        )
+    assert model.call_count == 1 and recovered["analysis_method"] == "ollama"
 
 
 def test_multi_group_report_cannot_silently_omit_comparison(tmp_path):
@@ -315,6 +324,10 @@ def test_multi_group_report_cannot_silently_omit_comparison(tmp_path):
     result, _ = generate(
         "2026-01-05", [], dict(provider="rules", input=str(source)), tmp_path / "out", work_dir=tmp_path / "work"
     )
+    invalid = copy.deepcopy(result["content"])
+    invalid["thesis"] = "成员999999 分享观点"
+    with pytest.raises(ValueError, match="成员编号"):
+        validate_brief(invalid, result["sources"], result["visuals"], result["groups"], result["members"])
     result["content"]["group_comparison"] = []
     with pytest.raises(ValueError, match="群间对照"):
         validate_brief(result["content"], result["sources"], result["visuals"], result["groups"])

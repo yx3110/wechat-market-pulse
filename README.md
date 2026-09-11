@@ -31,6 +31,13 @@ Start-Process .\demo-output\briefing.html
 
 安装脚本会选择已有的受支持 Python，创建项目虚拟环境并验收 demo；已有环境不重复创建。手动安装可用所选解释器运行 `-m venv .venv`，再用环境内 Python 执行 `-m pip install -e '.[media]'`。中文字体随安装包提供。`[media]` 添加 HEVC/WXGF 图片解码；纯文字、PNG/JPEG 和规则分析可用基础安装。
 
+<details>
+<summary>查看虚构的两群示例长图（纯脚本模式，无真实聊天）</summary>
+
+<img src="docs/example-rules.png" alt="两个虚构群的规则分析长图：多群对照、个股、生活与其他话题" width="480">
+
+</details>
+
 ## 读取自己的群
 
 以下命令使用虚拟环境中的 `wechat-pulse`；激活环境后可直接使用命令名。

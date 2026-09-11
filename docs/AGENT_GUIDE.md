@@ -6,7 +6,7 @@
 
 ## 可直接执行的起步指令
 
-macOS 在仓库根目录执行 `bash scripts/install-macos.sh`；Windows 执行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\install-windows.ps1`。脚本会给出缺失环境的具体提示。安装后始终调用项目虚拟环境里的可执行文件，不假设全局 PATH 已修改。
+macOS 在仓库根目录执行 `bash scripts/install-macos.sh`；Windows 执行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1`。脚本会给出缺失环境的具体提示。安装后始终调用项目虚拟环境里的可执行文件，不假设全局 PATH 已修改。
 
 新安装先完成 rules 示例。对已有安装，先检查 `wechat-pulse --json doctor`，不要用 `init --force` 修复不相关错误。生成成功后读取结果中的 `image` 路径核对实际 PNG，而不是只检查退出码。无微信或初始化受限时，`--input examples/messages.jsonl --date 2026-01-05` 仍可以验证完整流程。
 

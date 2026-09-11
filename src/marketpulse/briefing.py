@@ -7,6 +7,7 @@ from filelock import FileLock, Timeout
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -20,7 +21,7 @@ from .media import resolve_images
 
 VERSION = "holistic-vision-v1"
 CONTEXT_VISION_VERSION = "holistic-context-images-v2"
-BRIEF_VERSION = "holistic-portable-v6"
+BRIEF_VERSION = "holistic-portable-v7"
 
 ADVICE_REFERENCES = [
     {
@@ -324,8 +325,12 @@ def analyze_images(media, records, cache_dir, cfg, progress=print):
     return sorted(results, key=lambda r: r["image_id"])
 
 
-def validate_brief(data, sources, visuals, groups=None):
+def validate_brief(data, sources, visuals, groups=None, members=None):
     brief = Brief.model_validate(data)
+    aliases = {s.get("speaker") for s in sources.values()} - {None}
+    aliases.update(m["alias"] for m in members or [])
+    if aliases and not set(re.findall(r"成员\d+", json.dumps(data, ensure_ascii=False))) <= aliases:
+        raise ValueError("报告出现不存在的成员编号，未发布；发言身份与消息编号不能混用")
     if groups and len(groups) > 1 and not brief.group_comparison:
         raise ValueError("多群报告缺少群间对照，未发布；请换模型或使用规则回退")
     known_images = {v["image_id"]: v for v in visuals}
@@ -430,7 +435,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
     ).hexdigest()
     if (out / "briefing.json").exists():
         existing = json.loads((out / "briefing.json").read_text(encoding="utf-8"))
-        if existing.get("input_fingerprint") == fingerprint:
+        if existing.get("input_fingerprint") == fingerprint and existing.get("analysis_method") != "rules-fallback":
             changes = refresh_attributions(existing, records)
             existing["groups"] = groups
             save_json(out / "briefing.json", existing)
@@ -465,17 +470,22 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
         from .reduction import reduce_payload
 
         payload["groups"] = [{"alias": g["alias"], "messages": g["messages"]} for g in groups]
+        payload["participants"] = [
+            {"alias": m["alias"], "group": next(g["alias"] for g in groups if g["id"] == m["group_id"])}
+            for m in people.values()
+        ]
         try:
             payload = reduce_payload(payload, cfg, progress)
             data = call_model(
                 BRIEF_PROMPT
+                + f"\n本次明确有 {len(groups)} 个群、{len(people)} 位成员、{len(transcript)} 条文字/回复和 {len(visual_payload)} 张图片记录。成员编号只使用 participants.alias，它是身份编号，不能把 T消息编号换成成员编号。图片为零时禁止虚构截图。"
                 + "\n多个群时必须输出 group_comparison（title/text/sources），按群归纳关注点与差异，区分重复转发和独立证据。单群返回空列表。正文群来源使用群N。\n资料="
                 + json.dumps(payload, ensure_ascii=False),
                 Brief.model_json_schema(),
                 cfg,
                 timeout=cfg.get("model_timeout", 360),
             )
-            validate_brief(data, sources, visuals, groups)
+            validate_brief(data, sources, visuals, groups, people.values())
         except (RuntimeError, ValueError):
             if not cfg.get("fallback_rules"):
                 raise
@@ -486,7 +496,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
             data["limitations"].insert(0, "配置的模型未完成，本次按已启用的 fallback_rules 回退到本地规则模式。")
             method = "rules-fallback"
     save_json(work / "briefing-candidate.json", data)
-    content = validate_brief(data, sources, visuals, groups)
+    content = validate_brief(data, sources, visuals, groups, people.values())
     result = {
         "version": BRIEF_VERSION,
         "input_fingerprint": fingerprint,

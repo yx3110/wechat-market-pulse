@@ -43,6 +43,8 @@ wechat-pulse init --provider ollama --model qwen3:0.6b
 
 使用 `/api/chat`、非流式响应和 JSON schema，见 [Ollama API](https://docs.ollama.com/api/chat)、[结构化输出](https://docs.ollama.com/capabilities/structured-outputs)。默认 `local_only: true` 仅连接本机回环地址，不使用 HTTP 代理，也不重定向到远程地址。
 
+完整流程实测还包括 [`qwen3:14b`](https://ollama.com/library/qwen3:14b)（权重约 9.3 GB）：48 GiB Mac 上开启 `think: true`，约 47 秒处理虚构双群示例。权重大小不等于实际内存占用，也不是最低配置承诺；人工复核仍发现细节误读，见 [验证记录](VALIDATION.md)。本地模型和云端模型都需要核对结果，程序不会把有来源编号当作已经证明结论正确。
+
 本地配置可以调整 `num_ctx`（默认 32768）、`max_input_chars`（预设 12000）和 `model_timeout`。`max_input_chars` 是消息资料的字符预算，并非精确 token 数；提示词和 schema 也占上下文。小模型无法稳定输出或机器内存不足时，用 rules 模式仍可整理文字。
 
 ## LM Studio / vLLM
