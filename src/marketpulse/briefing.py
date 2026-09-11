@@ -20,7 +20,7 @@ from .media import resolve_images
 
 VERSION = "holistic-vision-v1"
 CONTEXT_VISION_VERSION = "holistic-context-images-v2"
-BRIEF_VERSION = "holistic-portable-v5"
+BRIEF_VERSION = "holistic-portable-v6"
 
 ADVICE_REFERENCES = [
     {

@@ -188,7 +188,8 @@ def test_model_failure_does_not_expose_credentials_or_prompt(monkeypatch):
 
 
 def test_large_chat_reduction_preserves_evidence_ids():
-    payload = dict(messages=[dict(id=f"T{i:03d}", text="测试" * 1000) for i in range(10)], images=[])
+    chart = dict(image_id="I01", kind="chart", names=["虚构标的"], codes=["000001"], caveats=["历史光标"])
+    payload = dict(messages=[dict(id=f"T{i:03d}", text="测试" * 1000) for i in range(10)], images=[chart])
 
     def model(prompt, schema, cfg, **kwargs):
         chunk = json.loads(prompt.split("\n")[-1])
@@ -198,6 +199,8 @@ def test_large_chat_reduction_preserves_evidence_ids():
         result = reduce_payload(payload, dict(max_input_chars=6000))
     assert result["reduced"] and model.call_count > 1
     assert len({n["sources"][0] for n in result["evidence_notes"]}) > 1
+    assert result["images"] == [chart]
+    assert len(json.dumps(result, ensure_ascii=False)) <= 6000
 
 
 def test_windows_candidate_is_verified_against_real_sqlcipher_page(tmp_path):

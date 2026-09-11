@@ -17,12 +17,21 @@ def reduce_payload(payload, cfg, progress=print):
     limit = int(cfg.get("max_input_chars", 60000))
     if limit < 6000:
         raise ValueError("max_input_chars 至少为 6000；上下文更小请使用 rules 模式")
-    known = {r["id"] for r in payload["messages"]} | {r["image_id"] for r in payload["images"]}
-    current = list(payload["messages"]) + list(payload["images"])
+    # Keep image IDs, names, codes and caveats available for exact chart binding.
+    # Reducing these observations to free text loses the final writer's catalog.
+    fixed = {k: v for k, v in payload.items() if k != "messages"}
+    reserved = len(json.dumps(fixed, ensure_ascii=False)) + 128
+    text_limit = limit - reserved
+    if len(json.dumps(payload, ensure_ascii=False)) <= limit:
+        return payload
+    if text_limit < 3000:
+        raise ValueError("图片证据目录超过上下文预算；增大 max_input_chars、缩小时段/群数或使用 rules")
+    known = {r["id"] for r in payload["messages"]}
+    current = list(payload["messages"])
     for level in range(4):
-        if len(json.dumps(current, ensure_ascii=False)) <= limit:
+        if len(json.dumps(current, ensure_ascii=False)) <= text_limit:
             if level:
-                return {k: v for k, v in payload.items() if k not in ("messages", "images")} | {
+                return fixed | {
                     "evidence_notes": current,
                     "reduced": True,
                 }
@@ -30,13 +39,13 @@ def reduce_payload(payload, cfg, progress=print):
         chunks, chunk, size = [], [], 0
         for item in current:
             length = len(json.dumps(item, ensure_ascii=False))
-            if length > limit:
+            if length > text_limit:
                 raise ValueError("单条资料超过上下文上限，请增大 max_input_chars 或使用 rules")
-            if chunk and size + length > limit:
+            if chunk and size + length + 2 > text_limit:
                 chunks.append(chunk)
                 chunk, size = [], 0
             chunk.append(item)
-            size += length
+            size += length + 2
         if chunk:
             chunks.append(chunk)
         following = []
