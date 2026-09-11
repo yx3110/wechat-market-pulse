@@ -1,0 +1,498 @@
+diff --git a/cmd/wxkey/main.go b/cmd/wxkey/main.go
+index 752f079..f072fed 100644
+--- a/cmd/wxkey/main.go
++++ b/cmd/wxkey/main.go
+@@ -68,12 +68,12 @@ Subcommands:
+ Notes:
+   - WeChat must be running and have opened at least one DB this session.
+   - SIP stays enabled. First-time key extraction uses one route only:
+-    ad-hoc-signed WeChat + sudo privileges. Bootstrap signs a wechat-cli-managed
+-    shadow copy when the installed WeChat cannot be modified. wxkey asks for
+-    the admin password once and stores it in the user's macOS Keychain for
+-    later unattended refreshes.
+-  - wxkey will re-launch itself through sudo -S when direct attach fails (set
+-    WXKEY_NO_ELEVATE=1 to disable that auto-relaunch).
++    ad-hoc-signed WeChat + administrator privileges. Bootstrap signs a
++    wechat-cli-managed shadow copy when the installed WeChat cannot be modified.
++  - wxkey never reads or stores the administrator password. When direct attach
++    fails, macOS displays its system administrator authentication dialog via
++    osascript. Every future refresh that needs elevation requires a new macOS
++    authorization (set WXKEY_NO_ELEVATE=1 to disable re-launch).
+ `
+ 
+ func main() {
+@@ -257,7 +257,7 @@ func runScan(args []string, doSetup bool) {
+ 		} else {
+ 			// Auto-elevate on permission failure.
+ 			if isPermissionErr(err) && !envTrue("WXKEY_NO_ELEVATE") && !envTrue("WXKEY_ELEVATED") {
+-				logf(f.quiet, "[wxkey] task_for_pid denied; re-launching via stored sudo credential...\n")
++				logf(f.quiet, "[wxkey] task_for_pid denied; requesting macOS administrator authorization...\n")
+ 				if reErr := reExecElevated(); reErr != nil {
+ 					fail("%s", buildElevateFailHint(reErr, err))
+ 				}
+@@ -524,7 +524,7 @@ func runImageKey(args []string) {
+ 	img, err := scanImageKey(pid, root, f.quiet)
+ 	if err != nil {
+ 		if isPermissionErr(err) && !envTrue("WXKEY_NO_ELEVATE") && !envTrue("WXKEY_ELEVATED") {
+-			logf(f.quiet, "[wxkey] task_for_pid denied; re-launching via stored sudo credential...\n")
++			logf(f.quiet, "[wxkey] task_for_pid denied; requesting macOS administrator authorization...\n")
+ 			if reErr := reExecElevated(); reErr != nil {
+ 				fail("%s", buildElevateFailHint(reErr, err))
+ 			}
+@@ -549,9 +549,6 @@ func runBootstrap(args []string) {
+ 	if cfgPath == "" {
+ 		cfgPath = defaultConfigPath()
+ 	}
+-	if err := ensureStoredSudoPassword(); err != nil {
+-		fail("prepare stored sudo credential: %v", err)
+-	}
+ 	var existingCfg wxcliConfig
+ 	existingReady := false
+ 	printedHeader := false
+@@ -562,7 +559,7 @@ func runBootstrap(args []string) {
+ 		printedHeader = true
+ 		fmt.Printf("[OK] key config already exists: %s\n", cfgPath)
+ 		fmt.Printf("     wxid=%s db_root=%s keys=%d\n", cfg.WxID, cfg.DBRoot, len(cfg.Keys))
+-		fmt.Println("     sudo credential is stored in macOS Keychain; wechat-cli can refresh keys without SIP.")
++		fmt.Println("     wxkey stores no administrator credential; macOS may show its administrator authentication dialog when refresh needs elevation.")
+ 		if configHasImageKey(cfg) {
+ 			return
+ 		}
+@@ -580,7 +577,7 @@ func runBootstrap(args []string) {
+ 	} else {
+ 		fmt.Println("[INFO] Goal: prepare ~/.config/wxcli/config.json with SIP enabled.")
+ 	}
+-	fmt.Println("[INFO] Admin password is stored once in macOS Keychain for unattended future setup/refresh.")
++	fmt.Println("[INFO] wxkey does not read or store the administrator password; macOS Authorization Services handles the system prompt when needed.")
+ 
+ 	if _, err := os.Stat(wechatAppPath); err != nil {
+ 		fail("WeChat app not found at %s: %v", wechatAppPath, err)
+@@ -691,7 +688,7 @@ func runBootstrap(args []string) {
+ 	fmt.Printf("       db_root: %s\n", res.Root)
+ 	fmt.Printf("       keys: %d\n", len(res.Results))
+ 	fmt.Println("")
+-	fmt.Println("Done. Start wechat-cli now; future key refresh uses stored sudo while SIP stays enabled.")
++	fmt.Println("Done. Start wechat-cli now; future elevated key refreshes require a new macOS administrator authorization while SIP stays enabled.")
+ }
+ 
+ // --- helpers ---
+@@ -2063,7 +2060,7 @@ func writeImageKeyToConfig(path, key string, xorKey *int) error {
+ 
+ func effectiveUserHome() string {
+ 	// reExecElevated forwards the invoking user's HOME explicitly when it
+-	// spawns the elevated (root) child via sudo. Trust that first —
++	// spawns the elevated (root) child through Authorization Services. Trust that first —
+ 	// stat /dev/console and SUDO_USER are both unreliable in non-sudo paths
+ 	// (e.g. GUI prompts under fast user switching / locked screen /
+ 	// headless sessions).
+@@ -2253,144 +2250,56 @@ func isPermissionErr(err error) bool {
+ 		(strings.Contains(msg, "kr=5") || strings.Contains(msg, "kr=4"))
+ }
+ 
+-const sudoKeychainService = "r266.wx-mcp.sudo"
++const administratorJXA = `function run(argv) {
++	if (argv.length !== 1) throw new Error("wxkey expected one command argument");
++	const app = Application.currentApplication();
++	app.includeStandardAdditions = true;
++	return app.doShellScript(argv[0], {administratorPrivileges: true, alteringLineEndings: false});
++}`
+ 
+-func sudoKeychainAccount() string {
+-	if u := strings.TrimSpace(os.Getenv("WXKEY_ORIG_USER")); u != "" && u != "root" {
+-		return u
+-	}
+-	if u := strings.TrimSpace(os.Getenv("SUDO_USER")); u != "" && u != "root" {
+-		return u
+-	}
+-	if cu, err := userpkg.Current(); err == nil {
+-		if cu.Username != "" && cu.Username != "root" {
+-			return cu.Username
+-		}
+-	}
+-	if u := strings.TrimSpace(os.Getenv("USER")); u != "" {
+-		return u
+-	}
+-	return "wx-mcp"
++// shellQuoteArg returns one POSIX-sh word. The privileged JXA source is fixed;
++// only this fully quoted command string is passed through its argv. No caller
++// data is interpolated into the fixed JXA source executed by osascript.
++func shellQuoteArg(s string) string {
++	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+ }
+ 
+-func ensureStoredSudoPassword() error {
+-	if os.Geteuid() == 0 {
+-		return nil
+-	}
+-	if pw, err := readStoredSudoPassword(); err == nil {
+-		if err := sudoValidatePassword(pw); err == nil {
+-			return nil
+-		}
+-	}
+-	pw, err := promptSudoPasswordGUI()
+-	if err != nil {
+-		return err
++func administratorCommand(args ...string) *exec.Cmd {
++	quoted := make([]string, len(args))
++	for i, arg := range args {
++		quoted[i] = shellQuoteArg(arg)
+ 	}
+-	if err := sudoValidatePassword(pw); err != nil {
+-		return fmt.Errorf("sudo password rejected: %w", err)
+-	}
+-	if err := storeSudoPassword(pw); err != nil {
+-		return err
+-	}
+-	return nil
+-}
+-
+-func readStoredSudoPassword() (string, error) {
+-	cmd := exec.Command("/usr/bin/security", "find-generic-password",
+-		"-a", sudoKeychainAccount(),
+-		"-s", sudoKeychainService,
+-		"-w")
+-	out, err := cmd.Output()
+-	if err != nil {
+-		return "", err
+-	}
+-	pw := strings.TrimRight(string(out), "\r\n")
+-	if pw == "" {
+-		return "", fmt.Errorf("stored sudo password is empty")
+-	}
+-	return pw, nil
++	commandText := strings.Join(quoted, " ")
++	// The fixed JXA only asks Authorization Services to execute
++	// commandText. It contains no password field and returns only command output.
++	// Password entry and validation remain entirely inside the macOS system UI.
++	return exec.Command("/usr/bin/osascript", "-l", "JavaScript", "-e", administratorJXA, "--", commandText)
+ }
+ 
+-func storeSudoPassword(password string) error {
+-	script := fmt.Sprintf("add-generic-password -a %s -s %s -l %s -j %s -U -X %s\n",
+-		securityArgQuote(sudoKeychainAccount()),
+-		securityArgQuote(sudoKeychainService),
+-		securityArgQuote("wechat-cli sudo password"),
+-		securityArgQuote("Stored by wxkey for unattended no-SIP WeChat DB key refresh"),
+-		hex.EncodeToString([]byte(password)),
+-	)
+-	cmd := exec.Command("/usr/bin/security", "-i")
+-	cmd.Stdin = strings.NewReader(script)
+-	var stderr strings.Builder
+-	cmd.Stderr = &stderr
+-	if err := cmd.Run(); err != nil {
+-		return fmt.Errorf("store sudo password in Keychain: %w: %s", err, strings.TrimSpace(stderr.String()))
+-	}
+-	return nil
+-}
+-
+-func securityArgQuote(s string) string {
+-	s = strings.ReplaceAll(s, `\`, `\\`)
+-	s = strings.ReplaceAll(s, `"`, `\"`)
+-	s = strings.ReplaceAll(s, "\n", `\n`)
+-	return `"` + s + `"`
+-}
+-
+-func promptSudoPasswordGUI() (string, error) {
+-	script := `display dialog "wechat-cli needs your Mac admin password once. It will be stored in your macOS Keychain so future WeChat key refreshes can run unattended without disabling SIP." default answer "" with hidden answer buttons {"Cancel", "Store"} default button "Store" cancel button "Cancel" with title "wechat-cli setup"`
+-	cmd := exec.Command("/usr/bin/osascript", "-e", script, "-e", "text returned of result")
+-	out, err := cmd.Output()
+-	if err != nil {
+-		return "", fmt.Errorf("sudo password prompt cancelled or failed: %w", err)
+-	}
+-	pw := strings.TrimRight(string(out), "\r\n")
+-	if pw == "" {
+-		return "", fmt.Errorf("empty sudo password")
+-	}
+-	return pw, nil
+-}
+-
+-func sudoValidatePassword(password string) error {
+-	cmd := exec.Command("/usr/bin/sudo", "-S", "-p", "", "-v")
+-	cmd.Stdin = strings.NewReader(password + "\n")
+-	var stderr strings.Builder
+-	cmd.Stderr = &stderr
+-	if err := cmd.Run(); err != nil {
+-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+-	}
+-	return nil
+-}
+-
+-func sudoCommandWithPassword(password string, args ...string) *exec.Cmd {
+-	cmd := exec.Command("/usr/bin/sudo", append([]string{"-S", "-p", ""}, args...)...)
+-	cmd.Stdin = strings.NewReader(password + "\n")
+-	return cmd
+-}
+-
+-// buildElevateFailHint composes an actionable hint when stored-sudo
+-// auto-elevation fails.
++// buildElevateFailHint composes an actionable hint when macOS administrator
++// authorization fails.
+ func buildElevateFailHint(reErr, origErr error) string {
+ 	if strings.Contains(reErr.Error(), "scan deadline exceeded") || strings.Contains(reErr.Error(), "no keys found") {
+ 		var b strings.Builder
+ 		fmt.Fprintf(&b, "elevated key scan failed: %v\n", reErr)
+ 		fmt.Fprintln(&b, "")
+-		fmt.Fprintln(&b, "       The stored-sudo/task_for_pid route worked, but wxkey did not find a")
++		fmt.Fprintln(&b, "       The macOS-authorization/task_for_pid route worked, but wxkey did not find a")
+ 		fmt.Fprintln(&b, "       usable DB key before the scan finished. Keep WeChat open, open one")
+ 		fmt.Fprintln(&b, "       chat/page that needs decrypting, then rerun `wxkey setup` or")
+ 		fmt.Fprintln(&b, "       `wxkey bootstrap`. Do not disable SIP.")
+ 		return b.String()
+ 	}
+ 	var b strings.Builder
+-	fmt.Fprintf(&b, "auto-elevate via stored sudo credential failed: %v\n", reErr)
++	fmt.Fprintf(&b, "macOS administrator authorization failed: %v\n", reErr)
+ 	fmt.Fprintf(&b, "       original permission error: %v\n", origErr)
+ 	fmt.Fprintln(&b, "")
+ 	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != "" {
+-		fmt.Fprintln(&b, "       You appear to be on SSH. Run `wxkey bootstrap` once from the Mac's")
+-		fmt.Fprintln(&b, "       desktop session so wxkey can collect and store the sudo password in")
+-		fmt.Fprintln(&b, "       Keychain. Later setup runs can be unattended.")
++		fmt.Fprintln(&b, "       You appear to be on SSH. The macOS administrator dialog must be")
++		fmt.Fprintln(&b, "       approved in the active desktop session. wxkey does not capture or")
++		fmt.Fprintln(&b, "       persist administrator credentials.")
+ 	} else {
+-		fmt.Fprintln(&b, "       Re-run `wxkey bootstrap` once and enter the Mac admin password in the")
+-		fmt.Fprintln(&b, "       wechat-cli hidden prompt. wxkey will verify it and store it in Keychain.")
++		fmt.Fprintln(&b, "       Re-run `wxkey bootstrap` and approve the macOS system administrator")
++		fmt.Fprintln(&b, "       dialog. wxkey never reads or stores the password.")
+ 	}
+ 	return b.String()
+ }
+@@ -2532,7 +2441,7 @@ func printPermissionAdvice(quiet bool, original error) {
+ 		fmt.Fprintf(os.Stderr, "       原始错误: %v\n", original)
+ 	}
+ 	fmt.Fprintln(os.Stderr, "")
+-	fmt.Fprintln(os.Stderr, "       wechat-cli 的运行时解密不需要关闭 SIP; 取 key 只需要 no-SIP 重签 + 已存储的 sudo 凭据.")
++	fmt.Fprintln(os.Stderr, "       wechat-cli 的运行时解密不需要关闭 SIP; 取 key 只需要 no-SIP 重签 + 每次 macOS 系统管理员授权.")
+ 
+ 	if disabled, raw := sipDisabled(); raw != "" {
+ 		if disabled {
+@@ -2549,7 +2458,7 @@ func printPermissionAdvice(quiet bool, original error) {
+ 			fmt.Fprintf(os.Stderr, "       codesign 输出: %s\n", sig.Raw)
+ 		}
+ 	} else if sig.AdHoc {
+-		fmt.Fprintln(os.Stderr, "       WeChat 签名: ad-hoc, 已是推荐状态. 请先跑 `wxkey bootstrap` 存储 sudo 凭据")
++		fmt.Fprintln(os.Stderr, "       WeChat 签名: ad-hoc, 已是推荐状态. 请跑 `wxkey bootstrap` 并在 macOS 系统认证框授权")
+ 	} else if sig.Runtime {
+ 		fmt.Fprintln(os.Stderr, "       WeChat 签名: 官方 Hardened Runtime. 推荐执行一次:")
+ 		fmt.Fprintln(os.Stderr, "         ./wxkey resign-wechat")
+@@ -2560,7 +2469,7 @@ func printPermissionAdvice(quiet bool, original error) {
+ 	}
+ 
+ 	fmt.Fprintln(os.Stderr, "")
+-	fmt.Fprintln(os.Stderr, "       不支持通过关闭 SIP 作为安装路径; 修复 no-SIP sudo/Keychain 路径.")
++	fmt.Fprintln(os.Stderr, "       不支持通过关闭 SIP 作为安装路径; 请在 macOS 系统管理员认证框授权，wxkey 不保存管理员凭据.")
+ }
+ 
+ // sipDisabled parses `csrutil status`. Returns disabled=true only if csrutil
+@@ -2584,8 +2493,10 @@ func sipDisabled() (disabled bool, raw string) {
+ 	return false, ""
+ }
+ 
+-// reExecElevated re-launches this binary under sudo with administrator
+-// privileges, blocking until it exits, and forwards stdout/stderr. It also
++// reExecElevated re-launches this binary through fixed JXA using
++// macOS Authorization Services, blocks until it exits, and forwards command
++// stdout/stderr. Credential entry is handled only by the macOS system dialog;
++// wxkey never receives password input or output. It also
+ // forwards the invoking user's HOME and USER so the elevated (root) child
+ // can locate `~/Library/Containers/com.tencent.xinWeChat/...` belonging to
+ // the desktop user — `stat /dev/console` alone is unreliable (e.g. fast
+@@ -2595,16 +2506,6 @@ func reExecElevated() error {
+ 	if err != nil {
+ 		return err
+ 	}
+-	pw, err := readStoredSudoPassword()
+-	if err != nil {
+-		if err := ensureStoredSudoPassword(); err != nil {
+-			return err
+-		}
+-		pw, err = readStoredSudoPassword()
+-		if err != nil {
+-			return err
+-		}
+-	}
+ 	origHome, _ := os.UserHomeDir()
+ 	origUser := os.Getenv("USER")
+ 	if origUser == "" {
+@@ -2612,7 +2513,7 @@ func reExecElevated() error {
+ 			origUser = cu.Username
+ 		}
+ 	}
+-	args := []string{"env",
++	args := []string{"/usr/bin/env",
+ 		"WXKEY_ELEVATED=1",
+ 		"WXKEY_ORIG_HOME=" + origHome,
+ 		"WXKEY_ORIG_USER=" + origUser,
+@@ -2624,7 +2525,7 @@ func reExecElevated() error {
+ 	}
+ 	args = append(args, exe)
+ 	args = append(args, os.Args[1:]...)
+-	cmd := sudoCommandWithPassword(pw, args...)
++	cmd := administratorCommand(args...)
+ 	cmd.Stdout = os.Stdout
+ 	var stderr strings.Builder
+ 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+@@ -2650,14 +2551,14 @@ func tailLines(s string, n int) string {
+ 
+ func runResignWeChat() {
+ 	if os.Geteuid() != 0 && !envTrue("WXKEY_NO_ELEVATE") && !envTrue("WXKEY_ELEVATED") {
+-		fmt.Fprintln(os.Stderr, "[wxkey] re-launching resign-wechat via stored sudo credential...")
++		fmt.Fprintln(os.Stderr, "[wxkey] requesting macOS administrator authorization for resign-wechat...")
+ 		if err := reExecElevated(); err != nil {
+ 			fail("re-elevate resign-wechat: %v", err)
+ 		}
+ 		return
+ 	}
+ 	if os.Geteuid() != 0 {
+-		fail("resign-wechat requires administrator privileges; run `wxkey bootstrap` once to store sudo credentials")
++		fail("resign-wechat requires administrator privileges; rerun and approve the macOS system administrator dialog")
+ 	}
+ 
+ 	fmt.Println("=== wxkey resign-wechat ===")
+@@ -2712,16 +2613,12 @@ func runCodesignWeChat() ([]byte, error) {
+ 	if os.Geteuid() == 0 {
+ 		return exec.Command("/usr/bin/codesign", "--force", "--deep", "--sign", "-", wechatAppPath).CombinedOutput()
+ 	}
+-	pw, err := readStoredSudoPassword()
+-	if err != nil {
+-		return nil, err
+-	}
+-	cmd := sudoCommandWithPassword(pw, "/usr/bin/codesign", "--force", "--deep", "--sign", "-", wechatAppPath)
++	cmd := administratorCommand("/usr/bin/codesign", "--force", "--deep", "--sign", "-", wechatAppPath)
+ 	return cmd.CombinedOutput()
+ }
+ 
+-// startOrphanWatchdog runs only in elevated children spawned via sudo.
+-// reExecElevated chains user → sudo → root wxkey. If anyone above
++// startOrphanWatchdog runs only in elevated children spawned through macOS
++// Authorization Services. If any process in the authorization chain above
+ // dies (parent CC kill, user cancels admin prompt, TaskStop on the unprivileged
+ // wxkey), the root child gets reparented to launchd (PPID=1). Without this,
+ // it keeps holding task_for_pid + scanning, can't be killed by the user, and
+@@ -2775,7 +2672,7 @@ func runDoctor(args []string) {
+ 		logf("[OK]   WeChat 签名: ad-hoc (推荐的 no-SIP 取 key 状态)\n")
+ 	} else if sig.Runtime {
+ 		logf("[WARN] WeChat 签名: 官方 Hardened Runtime\n")
+-		logf("       若 task_for_pid 被拒, 跑 `wxkey bootstrap` 存储 sudo 凭据并重签 WeChat, 不要关闭 SIP.\n")
++		logf("       若 task_for_pid 被拒, 跑 `wxkey bootstrap` 并在 macOS 系统认证框授权，不要关闭 SIP.\n")
+ 	} else {
+ 		logf("[INFO] WeChat 签名: 未识别\n")
+ 		if sig.Raw != "" {
+@@ -2851,7 +2748,7 @@ func runDoctor(args []string) {
+ 		}
+ 	} else {
+ 		logf("[WARN] key config 不存在或为空: %s\n", cfgPath)
+-		logf("       Agent 应先跑 `wxkey bootstrap`; 若已存 sudo 凭据, 可跑 `wxkey setup` 写 config.\n")
++		logf("       Agent 应先跑 `wxkey bootstrap`; 需要提权时由用户在 macOS 系统认证框授权.\n")
+ 	}
+ 
+ 	if !f.liveScan {
+diff --git a/cmd/wxkey/main_test.go b/cmd/wxkey/main_test.go
+index 10b2733..7729f81 100644
+--- a/cmd/wxkey/main_test.go
++++ b/cmd/wxkey/main_test.go
+@@ -8,7 +8,9 @@ import (
+ 	"encoding/json"
+ 	"fmt"
+ 	"os"
++	"os/exec"
+ 	"path/filepath"
++	"runtime"
+ 	"strings"
+ 	"testing"
+ 	"time"
+@@ -46,18 +48,83 @@ TeamIdentifier=5A4RE8SF68`)
+ 	}
+ }
+ 
+-func TestSudoKeychainAccountPrefersOriginalUser(t *testing.T) {
+-	t.Setenv("WXKEY_ORIG_USER", "alice")
+-	t.Setenv("SUDO_USER", "bob")
+-	if got := sudoKeychainAccount(); got != "alice" {
+-		t.Fatalf("sudoKeychainAccount = %q, want alice", got)
++func TestAdministratorCommandUsesFixedJXAAndNoStdin(t *testing.T) {
++	args := []string{"/usr/bin/env", "WXKEY_ELEVATED=1", "/tmp/wx key", "scan", "a'; touch /tmp/nope; echo '"}
++	cmd := administratorCommand(args...)
++	if cmd.Path != "/usr/bin/osascript" {
++		t.Fatalf("administrator command path = %q, want /usr/bin/osascript", cmd.Path)
++	}
++	if cmd.Stdin != nil {
++		t.Fatalf("administrator command unexpectedly reads stdin: %#v", cmd.Stdin)
++	}
++	quoted := make([]string, len(args))
++	for i, arg := range args {
++		quoted[i] = shellQuoteArg(arg)
++	}
++	want := []string{"/usr/bin/osascript", "-l", "JavaScript", "-e", administratorJXA, "--", strings.Join(quoted, " ")}
++	if strings.Join(cmd.Args, "\x00") != strings.Join(want, "\x00") {
++		t.Fatalf("administrator args = %#v, want %#v", cmd.Args, want)
++	}
++}
++
++func TestAdministratorJXAHasNoPasswordInputOrReturnPath(t *testing.T) {
++	lower := strings.ToLower(administratorJXA)
++	for _, forbidden := range []string{"password", "default answer", "text returned", "stdin", "keychain"} {
++		if strings.Contains(lower, forbidden) {
++			t.Fatalf("administrator JXA contains forbidden password path %q", forbidden)
++		}
++	}
++	for _, required := range []string{"argv[0]", "administratorprivileges: true", "doshellscript"} {
++		if !strings.Contains(lower, required) {
++			t.Fatalf("administrator JXA missing required fixed behavior %q", required)
++		}
++	}
++}
++
++func TestShellQuoteArgRoundTrip(t *testing.T) {
++	args := []string{"", "plain", "space value", "single'quote", "$(touch /tmp/must-not-run)", "line\nbreak", "; rm -rf /"}
++	quoted := make([]string, len(args))
++	for i, arg := range args {
++		quoted[i] = shellQuoteArg(arg)
++	}
++	command := "set -- " + strings.Join(quoted, " ") + `; for arg do /usr/bin/printf '<%s>\n' "$arg"; done`
++	out, err := exec.Command("/bin/sh", "-c", command).Output()
++	if err != nil {
++		t.Fatal(err)
++	}
++	var want strings.Builder
++	for _, arg := range args {
++		fmt.Fprintf(&want, "<%s>\n", arg)
++	}
++	if string(out) != want.String() {
++		t.Fatalf("shell quote round trip = %q, want %q", out, want.String())
+ 	}
+ }
+ 
+-func TestSudoCommandsUseSystemBinary(t *testing.T) {
+-	cmd := sudoCommandWithPassword("not-used", "-v")
+-	if cmd.Path != "/usr/bin/sudo" {
+-		t.Fatalf("sudo command path = %q, want /usr/bin/sudo", cmd.Path)
++func TestMainSourceHasNoCredentialCaptureOrPersistence(t *testing.T) {
++	_, testFile, _, ok := runtime.Caller(0)
++	if !ok {
++		t.Fatal("runtime.Caller failed")
++	}
++	source, err := os.ReadFile(filepath.Join(filepath.Dir(testFile), "main.go"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, forbidden := range []string{
++		`/usr/bin/security`,
++		`/usr/bin/sudo`,
++		`find-generic-password`,
++		`add-generic-password`,
++		`"-S"`,
++		`default answer`,
++		`text returned of result`,
++		`promptSudoPassword`,
++		`readStoredSudoPassword`,
++		`storeSudoPassword`,
++	} {
++		if bytes.Contains(source, []byte(forbidden)) {
++			t.Fatalf("main.go reintroduced forbidden credential path %q", forbidden)
++		}
+ 	}
+ }
+ 

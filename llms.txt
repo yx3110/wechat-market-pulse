@@ -1,0 +1,14 @@
+# WeChat Market Pulse
+
+Local WeChat 4.x group conversations and images to evidence-linked Chinese briefing PNGs.
+Windows/macOS Python package. Cloud, OpenAI-compatible, Ollama, LM Studio/vLLM and deterministic rules backends.
+
+- [README](README.md): features and quick start
+- [Agent guide](docs/AGENT_GUIDE.md): ordered setup, JSON interface and troubleshooting
+- [Installation](docs/INSTALL.md): prerequisites, account access and offline import
+- [Models](docs/MODELS.md): cloud/local/no-LLM configuration and limitations
+- [Delivery](docs/DELIVERY.md): original-file Taildrop and optional owner-bound ClawBot
+- [Validation](docs/VALIDATION.md): tested platforms and actual limits
+- [Security](SECURITY.md): private data and source boundaries
+- [Third party](THIRD_PARTY.md): source revisions and licenses
+- [Synthetic transcript](examples/messages.jsonl): import format

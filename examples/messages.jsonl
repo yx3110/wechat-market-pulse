@@ -1,0 +1,8 @@
+{"id": "demo-1", "group_id": "study", "group_name": "研究示例群", "sender_id": "alice", "sender": "小林", "sent_at": "2026-01-05T09:35:00+08:00", "message_kind": "text", "text": "宁德时代今天反弹，先核对公告和成交量。"}
+{"id": "demo-2", "group_id": "study", "group_name": "研究示例群", "sender_id": "bob", "sender": "阿青", "sent_at": "2026-01-05T10:12:00+08:00", "message_kind": "text", "text": "半导体虽然上涨，我还是担心指数走弱。"}
+{"id": "demo-3", "group_id": "study", "group_name": "研究示例群", "sender_id": "alice", "sender": "小林", "sent_at": "2026-01-05T12:10:00+08:00", "message_kind": "text", "text": "午饭吃牛肉面，这家还不错。"}
+{"id": "demo-4", "group_id": "study", "group_name": "研究示例群", "sender_id": "bob", "sender": "阿青", "sent_at": "2026-01-05T14:32:00+08:00", "message_kind": "text", "text": "比亚迪不是只看销量，还得核对利润。"}
+{"id": "demo-5", "group_id": "friends", "group_name": "交流示例群", "sender_id": "alice", "sender": "林同学（观察中）", "sent_at": "2026-01-05T09:40:00+08:00", "message_kind": "text", "text": "宁德时代反弹以后是否追高，我想再观察。"}
+{"id": "demo-6", "group_id": "friends", "group_name": "交流示例群", "sender_id": "carol", "sender": "小岚", "sent_at": "2026-01-05T13:08:00+08:00", "message_kind": "text", "text": "黄金和汇率的讨论很多，消息日期要核对。"}
+{"id": "demo-7", "group_id": "friends", "group_name": "交流示例群", "sender_id": "carol", "sender": "小岚", "sent_at": "2026-01-05T15:12:00+08:00", "message_kind": "text", "text": "本地模型需要多大显卡？我想用脚本先整理聊天。"}
+{"id": "demo-8", "group_id": "friends", "group_name": "交流示例群", "sender_id": "alice", "sender": "林同学（观察中）", "sent_at": "2026-01-05T18:20:00+08:00", "message_kind": "text", "text": "今天晚饭做了披萨，旅游照片下次发。"}

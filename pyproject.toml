@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wechat-market-pulse"
+version = "0.1.0"
+description = "Local WeChat group conversations and images, distilled into shareable daily briefings"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = "MIT"
+license-files = ["LICENSE", "licenses/*.txt"]
+authors = [{name = "WeChat Market Pulse contributors"}]
+dependencies = [
+  "sqlcipher3==0.6.2", "pydantic>=2.11,<3", "Pillow>=11.3,<13",
+  "pycryptodome>=3.23,<4", "zstandard>=0.23,<1", "platformdirs>=4.3,<5",
+  "filelock>=3.19,<4", "tzdata>=2025.2", "openai>=1.98,<3", "psutil>=7,<8",
+  "qrcode>=8.2,<9", "cryptography>=46,<51",
+]
+
+[project.optional-dependencies]
+media = ["av>=15,<18"]
+dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.12,<1"]
+
+[project.scripts]
+wechat-pulse = "marketpulse.cli:main"
+
+[project.urls]
+Repository = "https://github.com/yx3110/wechat-market-pulse"
+Issues = "https://github.com/yx3110/wechat-market-pulse/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/marketpulse"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["src/marketpulse/_vendor"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
