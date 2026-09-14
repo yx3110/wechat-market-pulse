@@ -90,6 +90,11 @@ def test_future_rows_filtered_and_short_stale_series_not_current():
         parse_daily(table(20), target(), "2025-03-06")
 
 
+def test_expanded_name_must_match_not_just_shared_short_alias():
+    with pytest.raises(ValueError, match="名称不能核对"):
+        parse_daily(table(), target(lookup_name="样本甲科技"), "2025-03-06")
+
+
 def test_close_cutoff_uses_returned_market_not_chinese_name_guess():
     assert cutoff_day("2025-03-06T21:00:00+08:00", target()) == "2025-03-05"
     assert cutoff_day("2025-03-06T21:00:00+08:00", target(), "A股财务行情数据库") == "2025-03-06"

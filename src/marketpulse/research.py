@@ -269,7 +269,7 @@ def parse_daily(text, target, cutoff):
         if date > cutoff:
             continue
         name = item.get("公司名称", item.get("标的名称", item.get("品种名称", item.get("指标主体", ""))))
-        if not name or (target["name"] not in name and target["lookup_name"] not in name):
+        if not name or target["lookup_name"].casefold() not in name.casefold():
             raise ValueError("日线返回标的与群中提及名称不能核对")
         names.add(name)
         if field != "volume":
