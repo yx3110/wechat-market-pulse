@@ -138,7 +138,7 @@ def test_gateway_cached_and_error_sanitized(tmp_path):
             with pytest.raises(RuntimeError, match="HTTP 402"):
                 gateway.request("/v1/fin_db", {"query": "样本乙"})
         assert post.call_count == 1
-    assert "fixture-secret" not in "".join(p.read_text() for p in tmp_path.glob("*.json"))
+    assert "fixture-secret" not in "".join(p.read_text(encoding="utf-8") for p in tmp_path.glob("*.json"))
 
 
 class FakeGateway:

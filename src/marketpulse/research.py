@@ -229,6 +229,12 @@ def day(value):
     raise ValueError("行情日期格式无法核对")
 
 
+def chinese_date(value):
+    # Python 3.11 on Windows passes strftime's format through the active
+    # locale. Keep Chinese literals out of the platform C runtime.
+    return f"{value.year}年{value.month:02d}月{value.day:02d}日"
+
+
 def number(value):
     value = float(str(value).replace(",", "").strip())
     if not math.isfinite(value):
@@ -445,8 +451,8 @@ def technical(target, as_of, gateway):
     # closing-time policy. This permits today's closed A-share bar by name too.
     cutoff = min(datetime.fromisoformat(as_of).astimezone(TZ), datetime.now(TZ)).date().isoformat()
     lookup = benchmark or target["lookup_name"]
-    start = (datetime.fromisoformat(cutoff) - timedelta(days=150)).strftime("%Y年%m月%d日")
-    end = datetime.fromisoformat(cutoff).strftime("%Y年%m月%d日")
+    start = chinese_date(datetime.fromisoformat(cutoff) - timedelta(days=150))
+    end = chinese_date(datetime.fromisoformat(cutoff))
     fields = (
         "前复权收盘价、前复权最高价、前复权最低价、成交量"
         if target["kind"] == "equity"
@@ -507,7 +513,7 @@ def news(target, as_of, gateway, opt):
         body["query"] = (
             target["lookup_name"]
             + " "
-            + cutoff.strftime("%Y年%m月")
+            + f"{cutoff.year}年{cutoff.month:02d}月"
             + (" 公告" if source == "announcement" else " 消息")
         )
     try:
