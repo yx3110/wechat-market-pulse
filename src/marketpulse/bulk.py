@@ -172,7 +172,7 @@ def _proto_fields(raw):
     return fields
 
 
-def parse_group_nicknames(raw):
+def parse_group_members(raw):
     """WeChat 4.x: repeated field 1 member, member field 1 UID / 2 room nickname.
 
     Field 4 in a member can contain the inviter's UID; it is never a nickname.
@@ -189,7 +189,7 @@ def parse_group_nicknames(raw):
                     raise ValueError("duplicate member identity/name field")
                 strings[number] = value.decode("utf-8").strip()
         uid, name = strings.get(1, ""), strings.get(2, "")
-        if not uid or not name:
+        if not uid:
             continue
         if any(ord(c) < 32 for c in uid + name):
             raise ValueError("invalid member identity/name")
@@ -199,7 +199,11 @@ def parse_group_nicknames(raw):
     return result
 
 
-def group_nicknames(path, key, group_id, cipher=CIPHER):
+def parse_group_nicknames(raw):
+    return {uid: name for uid, name in parse_group_members(raw).items() if name}
+
+
+def _room_members(path, key, group_id, cipher=CIPHER):
     cols = columns(path, key, "chat_room", cipher)
     if not {"username", "ext_buffer"} <= cols:
         return {}
@@ -208,9 +212,26 @@ def group_nicknames(path, key, group_id, cipher=CIPHER):
     if len(rows) > 1:
         raise RuntimeError("群昵称数据库有重复群记录，停止更新")
     try:
-        return parse_group_nicknames(bytes.fromhex(rows[0]["data"] or "")) if rows else {}
+        return parse_group_members(bytes.fromhex(rows[0]["data"] or "")) if rows else {}
     except (ValueError, UnicodeError):
         raise RuntimeError("群昵称数据结构不兼容，未用猜测结果覆盖昵称") from None
+
+
+def group_nicknames(path, key, group_id, cipher=CIPHER):
+    return {uid: name for uid, name in _room_members(path, key, group_id, cipher).items() if name}
+
+
+def read_group_members(group_id, key_config=KEY_CONFIG, cipher=CIPHER):
+    """List only verified room members, including those with no room nickname."""
+    root, keys = read_config(key_config)
+    with snapshot(root / "contact/contact.db") as path:
+        key = key_for(path, keys)
+        members = _room_members(path, key, group_id, cipher)
+        names = _member_names(_contact_rows(path, key, cipher), {uid: name for uid, name in members.items() if name})
+        return [
+            dict(sender_id=uid, **names.get(uid, {"name": "未同步昵称", "name_source": "unresolved"}))
+            for uid in sorted(members)
+        ]
 
 
 def _contact_rows(path, key, cipher=CIPHER):

@@ -43,6 +43,9 @@ def parser():
     sub.add_parser("models", help="列出本地、云端与规则模式的配置预设")
     groups = sub.add_parser("groups", help="列出本机群聊与稳定群 ID")
     groups.add_argument("--prefix", default="")
+    members = sub.add_parser("members", help="列出指定群的成员与稳定账号 ID，用于重点关注")
+    members.add_argument("--group-id", required=True)
+    members.add_argument("--search", default="")
     for command in ("report", "watch", "start"):
         q = sub.add_parser(
             command, help={"report": "生成报告", "watch": "前台持续更新", "start": "后台持续更新"}[command]
@@ -176,6 +179,14 @@ def run(args):
 
         return service(args.command)
     cfg = config(config_path)
+    if args.command == "members":
+        from .bulk import read_group_members
+
+        return [
+            m
+            for m in read_group_members(args.group_id, cfg.get("key_config", KEY_CONFIG))
+            if args.search.casefold() in m["name"].casefold()
+        ]
     if args.command == "groups":
         from .bulk import read_config, snapshot, key_for, _contact_rows
 

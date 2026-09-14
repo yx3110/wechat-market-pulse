@@ -22,6 +22,7 @@ macOS 在仓库根目录执行 `bash scripts/install-macos.sh`；Windows 执行 
 6. 用 `groups --prefix` 找群。用户已明确群名时解析稳定 ID；多个匹配时展示名称供选择，不擅自分析全部群。
 7. 指定日期、时段与群生成报告。检查 `coverage`、`analysis_method`、缺图标记与来源，再打开 PNG/HTML核对排版。
 8. 用户启用标的补查时阅读 [MARKET_RESEARCH.md](MARKET_RESEARCH.md)，在现有私有配置添加 `market_research`。保留密钥与离线偏好，核对 `market_research.status` 和各标的资料缺失标记；不要把补查完成说成所有群聊说法已核实。
+9. 用户指定重点成员时阅读 [FOCUS_MEMBERS.md](FOCUS_MEMBERS.md)，用 `members --group-id ... --search ...` 核对群内稳定身份，再写入 `focus_members`。不要按昵称持续匹配或自动关注别的群；多个同名结果必须确认，没发言时如实标记。
 
 ## 命令接口
 

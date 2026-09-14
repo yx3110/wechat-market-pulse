@@ -21,7 +21,7 @@ from .media import resolve_images
 
 VERSION = "holistic-vision-v1"
 CONTEXT_VISION_VERSION = "holistic-context-images-v2"
-BRIEF_VERSION = "holistic-portable-v8"
+BRIEF_VERSION = "holistic-portable-v9"
 
 ADVICE_REFERENCES = [
     {
@@ -411,6 +411,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
     work = Path(work_dir or ROOT / "data/holistic" / date)
     work.mkdir(parents=True, exist_ok=True, mode=0o700)
     from .inputs import prepare
+    from .focus import selections, update_focus
 
     records, media, groups = prepare(date, group_id, cfg, work, refresh)
     group_ids = [g["id"] for g in groups]
@@ -421,6 +422,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
             {
                 "version": BRIEF_VERSION,
                 "model": model_identity(cfg),
+                "focus_members": [(m["group_id"], m["sender_id"]) for m in selections(cfg, set(group_ids))],
                 "records": [(r["id"], r.get("participant_id"), r.get("content"), r.get("text")) for r in records],
                 "images": [
                     (
@@ -438,6 +440,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
         if existing.get("input_fingerprint") == fingerprint and existing.get("analysis_method") != "rules-fallback":
             changes = refresh_attributions(existing, records)
             existing["groups"] = groups
+            update_focus(existing, cfg, records, ROOT / "data/focus-cache", progress)
             update_research(existing, cfg, progress)
             save_json(out / "briefing.json", existing)
             progress(f"正文和图片均无变化，复用综合分析；已核对最新昵称，更新 {len(changes)} 位。", flush=True)
@@ -475,10 +478,15 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
             {"alias": m["alias"], "group": next(g["alias"] for g in groups if g["id"] == m["group_id"])}
             for m in people.values()
         ]
+        focused = {(m["group_id"], m["sender_id"]) for m in selections(cfg, set(group_ids))}
+        payload["focus_participants"] = [
+            m["alias"] for m in people.values() if (m["group_id"], m["sender_id"]) in focused
+        ]
         try:
             payload = reduce_payload(payload, cfg, progress)
             data = call_model(
                 BRIEF_PROMPT
+                + "\nfocus_participants 是用户指定的关注成员：保留其有实质依据的市场观点和分歧，不能把个人观点当成群共识；独立关注卡稍后生成。"
                 + f"\n本次明确有 {len(groups)} 个群、{len(people)} 位成员、{len(transcript)} 条文字/回复和 {len(visual_payload)} 张图片记录。成员编号只使用 participants.alias，它是身份编号，不能把 T消息编号换成成员编号。图片为零时禁止虚构截图。"
                 + "\n多个群时必须输出 group_comparison（title/text/sources），按群归纳关注点与差异，区分重复转发和独立证据。单群返回空列表。正文群来源使用群N。\n资料="
                 + json.dumps(payload, ensure_ascii=False),
@@ -527,6 +535,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
             "charts": sum(v["kind"] == "chart" for v in visuals),
         },
     }
+    update_focus(result, cfg, records, ROOT / "data/focus-cache", progress)
     update_research(result, cfg, progress)
     save_json(out / "briefing.json", result)
     return result, out

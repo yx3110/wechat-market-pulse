@@ -221,11 +221,64 @@ def research_card(c, y, item):
     return y + height + 24
 
 
+def focus_section(c, y, result):
+    entries = result.get("focus_members", [])
+    if not entries:
+        return y
+    y = c.section(y, "", "重点关注 · 指定成员", "按本人发言整理；被关注不代表观点更可靠，也不作为跟单依据。")
+    by_identity = {(m.get("group_id"), m.get("sender_id")): m["name"] for m in result["members"]}
+    replace = display_names(result)
+    for member in entries:
+        name = by_identity.get((member["group_id"], member["sender_id"]), member["name"])
+        name = re.sub(r"\d{7,}", "", name).strip().strip("【】") or "关注成员"
+        title = "【" + name + "】"
+        meta = member["group_name"] + f" · 本时段 {member['message_count']} 条记录 / {member['image_count']} 张图片"
+        if member.get("last_at"):
+            meta += " · 最近 " + member["last_at"][11:16]
+        rows = []
+        content = member.get("content")
+        if content:
+            rows.append(("主要观点", content["overview"]["text"]))
+            for key, label in (("positions", "关注标的与理由"), ("changes", "观点变化"), ("watch", "本人观察条件")):
+                for point in content[key]:
+                    rows.append((label + " · " + point["title"], point["text"]))
+            if not content["changes"]:
+                rows.append(("观点变化", "本时段没有足够前后证据确认观点发生变化。"))
+            for text in content["limitations"]:
+                rows.append(("资料边界", text))
+        else:
+            states = {
+                "no_messages": "本时段本机未同步到该成员发言；不代表本人没有发言、空仓或改变观点。",
+                "no_readable_content": "本时段有记录，但没有可分析正文或独立图片证据；不据此推断观点。",
+                "unavailable": "本次重点成员分析暂未完成，不能据此判断立场；原始发言仍保留在来源附录。",
+            }
+            rows.append(("本时段状态", states.get(member["status"], "暂无可用分析。")))
+        title_h, meta_h = c.ph(title, 1024, 40, True), c.ph(meta, 1024, 25)
+        height = (
+            95
+            + title_h
+            + meta_h
+            + sum(c.ph(label, 1024, 27, True) + 12 + c.ph(replace(text), 1024, 32) + 24 for label, text in rows)
+        )
+        c.card(y, height, "#F3ECDD")
+        z = c.para(84, y + 28, title, 1024, 40, TEAL, True) + 14
+        z = c.para(84, z, meta, 1024, 25, MUTED) + 28
+        for label, text in rows:
+            z = c.para(84, z, label, 1024, 27, TEAL, True) + 12
+            z = c.para(84, z, replace(text), 1024, 32) + 24
+        y += height + 24
+    return y + 18
+
+
 def render(result, output):
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
     c, r = (
-        Canvas(height=25000 + 2500 * min(12, len(result.get("market_research", {}).get("cards", [])))),
+        Canvas(
+            height=25000
+            + 2500 * min(12, len(result.get("market_research", {}).get("cards", [])))
+            + 3000 * min(12, len(result.get("focus_members", [])))
+        ),
         result["content"],
     )
     replace = display_names(result)
@@ -259,6 +312,13 @@ def render(result, output):
     c.txt(86, y + 35, "群内情绪  ·  " + r["mood"], 30, "#D5E9DA", True)
     header_end = y + 112
     y = header_height + 40
+    if result.get("source_notice"):
+        notice = result["source_notice"]
+        height = 100 + c.ph(notice, 1024, 30)
+        c.card(y, height, "#F7E7D5")
+        c.txt(84, y + 22, "数据同步提示", 30, AMBER, True)
+        c.para(84, y + 72, notice, 1024, 30, INK)
+        y += height + 30
     y = c.section(y, "01", "情绪怎样走到这里")
     for i, item in enumerate(r["timeline"]):
         text = replace(item["text"])
@@ -278,6 +338,7 @@ def render(result, output):
             z = c.para(84, y + 24, title, 1024, 35, TEAL, True) + 18
             c.para(84, z, text, 1024, 33)
             y += h + 18
+    y = focus_section(c, y, result)
     y = c.section(y, "02", "主要讨论线索")
     for n, item in enumerate(r["themes"], 1):
         c.txt(66, y, f"0{n}", 28, TEAL, True)
@@ -436,6 +497,8 @@ def render(result, output):
             MUTED,
         )
     for limitation in r["limitations"]:
+        if research_items:
+            limitation = limitation.replace("未联网核验", "群聊归纳部分未自行核验，外部补查另列")
         if research_items and any(word in limitation for word in ("未进行外部", "未外部核验")):
             limitation = "群聊归纳保留原观点和分歧；外部补查仅覆盖单独列出的标的、日期与来源。"
         y = c.para(64, y + 12, replace(limitation), 1072, 26, MUTED)
@@ -475,6 +538,23 @@ def render(result, output):
         )
     for iid, v in visuals.items():
         audit.append(f"<p id='{iid}'><b>{iid}</b><br>{html.escape(json.dumps(v, ensure_ascii=False))}</p>")
+    for member in result.get("focus_members", []):
+        audit.append("<h2>重点关注：" + html.escape(member["group_name"] + " / " + member["name"]) + "</h2>")
+        if member.get("content"):
+            content = member["content"]
+            for point in [content["overview"], *content["positions"], *content["changes"], *content["watch"]]:
+                links = " / ".join(
+                    f"<a href='#{html.escape(sid, quote=True)}'>{html.escape(sid)}</a>" for sid in point["sources"]
+                )
+                audit.append(
+                    "<p><b>"
+                    + html.escape(point["title"])
+                    + "</b><br>"
+                    + html.escape(point["text"])
+                    + "<br>"
+                    + links
+                    + "</p>"
+                )
     for item in research_items:
         audit.append(f"<h2 id='{item['id']}'>{html.escape(item['name'])} · 外部补查</h2>")
         audit.append("<p>触发依据：" + html.escape(item["source"] + " · " + item["quote"]) + "</p>")

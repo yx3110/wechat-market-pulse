@@ -16,3 +16,4 @@ Windows/macOS Python package. Cloud, OpenAI-compatible, Ollama, LM Studio/vLLM a
 ## Optional market evidence
 
 - [Daily technicals and recent news](docs/MARKET_RESEARCH.md): opt-in retrieval, private keys, source/date attribution, offline behavior and failure handling.
+- [Focused members](docs/FOCUS_MEMBERS.md): explicit per-room account selection, nickname updates, individual viewpoint evidence and no-message handling.

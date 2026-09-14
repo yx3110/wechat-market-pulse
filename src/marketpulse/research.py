@@ -185,6 +185,9 @@ def validate_targets(plan, catalog, stocks):
 def select_targets(result, cfg, opt):
     content, catalog = result["content"], evidence_catalog(result)
     items = content["stocks"] + content["other_mentions"] + content["themes"]
+    for member in result.get("focus_members", []):
+        if member.get("content"):
+            items += member["content"]["positions"]
     ids = {sid for item in items for sid in item["sources"]}
     evidence = {sid: catalog[sid] for sid in ids if sid in catalog}
     prompt = (
