@@ -12,3 +12,7 @@ Windows/macOS Python package. Cloud, OpenAI-compatible, Ollama, LM Studio/vLLM a
 - [Security](SECURITY.md): private data and source boundaries
 - [Third party](THIRD_PARTY.md): source revisions and licenses
 - [Synthetic transcript](examples/messages.jsonl): import format
+
+## Optional market evidence
+
+- [Daily technicals and recent news](docs/MARKET_RESEARCH.md): opt-in retrieval, private keys, source/date attribution, offline behavior and failure handling.

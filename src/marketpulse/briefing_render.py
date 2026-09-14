@@ -17,8 +17,8 @@ REG, BOLD = font_path(), font_path(True)
 
 
 class Canvas:
-    def __init__(self, width=W):
-        self.im = Image.new("RGB", (width, 25000), PAPER)
+    def __init__(self, width=W, height=25000):
+        self.im = Image.new("RGB", (width, height), PAPER)
         self.d = ImageDraw.Draw(self.im)
         self.fonts = {}
         self.section_count = 0
@@ -179,13 +179,60 @@ def social_section(c, y, number, title, subtitle, items, result, replace, fill):
     return y + 18
 
 
+def research_card(c, y, item):
+    """Keep retrieved facts visibly separate from the adjacent chat opinions."""
+    tech, news = item["technical"], item["news"]
+    rows = [("日线补查", tech["summary"])]
+    if tech.get("source"):
+        rows.append(
+            (
+                "行情口径",
+                f"{tech.get('instrument', item['lookup_name'])} · {tech['adjustment']} · "
+                f"价格 {tech['price_unit']} / 成交量 {tech['volume_unit']}；来源 {tech['source']}；"
+                f"查询于 {tech['fetched_at'][:16].replace('T', ' ')}（北京时间）。",
+            )
+        )
+    for hit in news["items"]:
+        level = {"full_text": "已取全文", "partial_text": "部分全文", "search_excerpt": "仅搜索摘要"}[hit["level"]]
+        source_label = {"announcement": "公告检索", "web": "网页检索"}.get(hit["source"], hit["source"])
+        rows.append(
+            (
+                "近期消息",
+                f"{hit['date']} · {hit['title']}（{level}，{source_label}）"
+                + ("；" + hit["timing_note"] if hit.get("timing_note") else ""),
+            )
+        )
+    if not news["items"]:
+        rows.append(("消息面补查", news["summary"]))
+    rows.extend(
+        [
+            ("对群观点的影响", item.get("interpretation", "补查解读未完成，以上仅为取得的资料。")),
+            ("观察条件", item.get("watch", "等待资料核对后再评估。")),
+        ]
+    )
+    title = item["name"] + " · 外部资料与分析"
+    height = 80 + c.ph(title, 1024, 35, True) + sum(44 + c.ph(text, 1024, 30) + 22 for _, text in rows)
+    c.card(y, height, "#EAF0F2")
+    z = c.para(84, y + 26, title, 1024, 35, TEAL, True) + 26
+    for label, text in rows:
+        c.txt(84, z, label, 25, TEAL, True)
+        z = c.para(84, z + 44, text, 1024, 30, INK) + 22
+    c.txt(84, y + height - 29, "外部依据 " + item["id"] + " · 来源链接及检索记录见附录", 21, MUTED)
+    return y + height + 24
+
+
 def render(result, output):
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
-    c, r = Canvas(), result["content"]
+    c, r = (
+        Canvas(height=25000 + 2500 * min(12, len(result.get("market_research", {}).get("cards", [])))),
+        result["content"],
+    )
     replace = display_names(result)
     visuals = {v["image_id"]: v for v in result["visuals"]}
     media = {m["id"]: m for m in result["media"]}
+    research = result.get("market_research", {})
+    research_items = research.get("cards", [])
     asof = result["as_of"][11:16]
     hour = int(asof[:2])
     edition = (
@@ -237,7 +284,14 @@ def render(result, output):
         c.txt(132, y - 2, item["title"], 36, TEAL, True)
         y = c.para(132, y + 54, replace(item["text"]), 990, 35) + 32
     y += 16
-    y = c.section(y, "03", "重点个股 · 把观点和图放在一起", "截图只代表图中时点；观察条件用于检验群观点。")
+    y = c.section(
+        y,
+        "03",
+        "重点标的 · 群观点与依据",
+        "截图只代表图中时点；外部补查单独标注数据日期与来源。"
+        if research_items
+        else "截图只代表图中时点；观察条件用于检验群观点。",
+    )
     for n, stock in enumerate(r["stocks"], 1):
         discussion, chart, disagreement, watch = (
             replace(stock[k]) for k in ("discussion", "chart", "disagreement", "watch")
@@ -281,11 +335,17 @@ def render(result, output):
         )
         c.txt(86, y + height - 36, "群聊依据  " + " / ".join(times[:6]), 22, MUTED)
         y += height + 24
+        for item in research_items:
+            if item.get("stock_name") == stock["name"]:
+                y = research_card(c, y, item)
     y += 18
     y = c.section(y, "04", "其他个股与市场线索")
     for item in r["other_mentions"]:
         c.txt(80, y, item["title"], 33, INK, True)
         y = c.para(80, y + 53, replace(item["text"]), 1035, 33, MUTED) + 28
+    for item in research_items:
+        if not item.get("stock_name"):
+            y = research_card(c, y, item)
     # Surface the latest clear supplementary chart actually cited by the brief.
     extra_ids = {sid for item in r["other_mentions"] for sid in item["sources"]}
     used_ids = {iid for stock in r["stocks"] for iid in stock["image_ids"]}
@@ -376,9 +436,22 @@ def render(result, output):
             MUTED,
         )
     for limitation in r["limitations"]:
+        if research_items and any(word in limitation for word in ("未进行外部", "未外部核验")):
+            limitation = "群聊归纳保留原观点和分歧；外部补查仅覆盖单独列出的标的、日期与来源。"
         y = c.para(64, y + 12, replace(limitation), 1072, 26, MUTED)
+    if research.get("status") not in (None, "disabled"):
+        note = (
+            "外部补查："
+            + research.get("checked_at", "")[:16].replace("T", " ")
+            + "（北京时间）。群聊观点与外部数据分开呈现；仅补查列出的标的和资料，不代表全部说法已核验。"
+        )
+        if research.get("status") == "partial":
+            note += "部分资料或解读未完成，以卡片缺失标记为准。"
+        if research.get("error"):
+            note += research["error"]
+        y = c.para(64, y + 12, note, 1072, 26, MUTED)
     method = "本地规则脚本" if result.get("analysis_method", "").startswith("rules") else "AI"
-    disclaimer = f"免责声明：本报告由{method}根据群聊及可读取资料生成，可能误读或遗漏；群友发言、传闻及截图未经独立行情和基本面核验。投资建议仅为一般性研究参考，未考虑你的资金、持仓、期限及风险承受能力，不构成个性化投资顾问服务或收益承诺。请独立核验并自主决策，投资有风险。"
+    disclaimer = f"免责声明：本报告由{method}根据群聊及可读取资料生成，可能误读或遗漏；群友发言、传闻及截图未逐项核验，外部补查范围以标注为准。投资建议仅为一般性研究参考，未考虑你的资金、持仓、期限及风险承受能力，不构成个性化投资顾问服务或收益承诺。请独立核验并自主决策，投资有风险。"
     y = c.para(64, y + 22, disclaimer, 1072, 26, MUTED)
     if result.get("advice_references"):
         y = c.para(
@@ -402,6 +475,41 @@ def render(result, output):
         )
     for iid, v in visuals.items():
         audit.append(f"<p id='{iid}'><b>{iid}</b><br>{html.escape(json.dumps(v, ensure_ascii=False))}</p>")
+    for item in research_items:
+        audit.append(f"<h2 id='{item['id']}'>{html.escape(item['name'])} · 外部补查</h2>")
+        audit.append("<p>触发依据：" + html.escape(item["source"] + " · " + item["quote"]) + "</p>")
+        tech = item["technical"]
+        if tech.get("raw"):
+            from .research import safe_url
+
+            source = html.escape(tech["source"])
+            url = safe_url(tech.get("url", ""))
+            if url:
+                source = f"<a href='{html.escape(url, quote=True)}'>{source}</a>"
+            audit.append(
+                f"<p id='{item['id']}D'>{source} · 查询于 {html.escape(tech['fetched_at'])}<br>"
+                + html.escape(tech.get("query", ""))
+                + "</p><pre>"
+                + html.escape(tech["raw"])
+                + "</pre>"
+            )
+        for hit in item["news"]["items"]:
+            title = html.escape(hit["title"])
+            if hit.get("url"):
+                from .research import safe_url
+
+                url = safe_url(hit["url"])
+                if url:
+                    title = f"<a href='{html.escape(url, quote=True)}'>{title}</a>"
+            audit.append(
+                f"<p id='{hit.get('id', item['id'])}'>{html.escape(hit['date'])} · {title}<br>"
+                + html.escape(hit["source"] + " · " + hit["level"])
+                + "<br>"
+                + html.escape(hit.get("full_text", hit["snippet"]))
+                + "</p>"
+            )
+            if hit.get("doc_id"):
+                audit.append("<p>原始公告检索句柄（无公开链接时保留来源定位）：" + html.escape(hit["doc_id"]) + "</p>")
     for ref in result.get("advice_references", []):
         audit.append(
             f"<p><a href='{html.escape(ref['url'], quote=True)}'>{html.escape(ref['title'])}</a><br>{html.escape(ref['scope'])}</p>"

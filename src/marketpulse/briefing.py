@@ -21,7 +21,7 @@ from .media import resolve_images
 
 VERSION = "holistic-vision-v1"
 CONTEXT_VISION_VERSION = "holistic-context-images-v2"
-BRIEF_VERSION = "holistic-portable-v7"
+BRIEF_VERSION = "holistic-portable-v8"
 
 ADVICE_REFERENCES = [
     {
@@ -126,7 +126,7 @@ life: 0至3个生活图文话题，整合吃饭、出行、日常物件、消费
 off_topic: 0至3个与股市无关且有实质内容的话题，例如学术、科技/AI使用、游戏/文化或社会事件。每项title<=18字，summary<=110字，综合主张、回应与分歧。新闻和商业案例标为转述，调侃不能当事实。与股票有关的段子仍放股市部分；纯复读不单列，不把生活闲聊用来判定看多看空。
 life/off_topic.image_ids: 每话题0至2张，全部新分区合计最多4张；只选本话题直接相关、主体可辨且kind=other的图片，优先清晰实物照片。图片也必须出现在该话题sources。不要选走势图/持仓/财经新闻图；涉及手机号、地址、订单号、车牌、证件、其他人的私聊截图或明确不宜展示的图只文字概述，image_ids=[]。生活图必须结合图中可见证据解析，不能仅有文字讨论而忽略所给生活图片。有资料时不要省略这两个区；没有足够素材时输出空列表，不凑数。
 investment_advice: 3至4项独立的分析者投资建议，与上文群友观点明确分开。至少2项针对本次重点股票；可按同一主题合并。每项title<=22字，basis<=60字（群聊证据及其不足），action<=85字（你根据证据提出的具体研究/持有/观望/风险管理建议及生效条件），risk<=60字（主要反向情景或放弃条件），sources为支撑依据。未知用户仓位、期限和承受能力，不给个人仓位比例，不编买卖价格/收益率，不依据群热度催促追涨或用群友晒单背书。只能得出观察建议时明确写观察，不勉强荐股。建议须体现本群具体分歧，不要四段通用风险提示。证监会风险提示仅支持独立核验群聊和晒单的原则，不证明本群存在违法问题。
-limitations: 2至3项重要范围限制，不要泛泛免责声明。未进行外部行情或公司基本面核验；末尾的投资建议仅是基于群聊资料的条件性推断。截图里的代码和名称可原样记录，但不据此确认真实上市身份。
+limitations: 2至3项重要范围限制，不要泛泛免责声明。本部分是群聊资料归纳；如启用外部补查，行情和消息会独立列在标的旁边，不能预先声称已经核验。末尾的投资建议仅是基于群聊资料的条件性推断。截图里的代码和名称可原样记录，但不据此确认真实上市身份。
 所有 sources 使用真实存在的 T编号或I编号（至少一项），并真正支撑该结论；正文用'12:15截图'等自然表达，不在正文写I编号。成员使用提供的'成员N'，稍后本地替换为【群昵称】；准确核对发言人，引用回复中的原发言不归给转发者；不用手机号/微信号。内容尽量精炼，股票部分不超过2200中文字，生活与其他话题合计不超过650字。
 """
 
@@ -438,6 +438,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
         if existing.get("input_fingerprint") == fingerprint and existing.get("analysis_method") != "rules-fallback":
             changes = refresh_attributions(existing, records)
             existing["groups"] = groups
+            update_research(existing, cfg, progress)
             save_json(out / "briefing.json", existing)
             progress(f"正文和图片均无变化，复用综合分析；已核对最新昵称，更新 {len(changes)} 位。", flush=True)
             return existing, out
@@ -526,8 +527,18 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
             "charts": sum(v["kind"] == "chart" for v in visuals),
         },
     }
+    update_research(result, cfg, progress)
     save_json(out / "briefing.json", result)
     return result, out
+
+
+def update_research(result, cfg, progress=print):
+    from .research import cache_identity, enrich
+
+    identity = cache_identity(cfg)
+    if result.get("research_fingerprint") != identity:
+        result["market_research"] = enrich(result, cfg, ROOT / "data/market-research-cache", progress)
+        result["research_fingerprint"] = identity
 
 
 def main():
