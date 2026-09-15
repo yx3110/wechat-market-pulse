@@ -9,7 +9,7 @@ from .core import digest, now
 from .models import StrictModel, call_model, model_identity
 from .reduction import reduce_payload
 
-VERSION = "focus-members-v1"
+VERSION = "focus-members-v2"
 
 
 class Point(StrictModel):
@@ -41,12 +41,18 @@ def selections(cfg, group_ids):
 
 
 def own_evidence(result, selected):
+    from .briefing import identity_visual
+
     def owns(row):
         return row.get("group_id") == selected["group_id"] and row.get("sender_id") == selected["sender_id"]
 
     sources = {sid: row for sid, row in result["sources"].items() if owns(row)}
     media = {row["id"]: row for row in result["media"] if owns(row)}
-    visuals = [v for v in result["visuals"] if v["image_id"] in media and not v.get("excluded_from_analysis")]
+    visuals = [
+        identity_visual(v) if v.get("kind") else v
+        for v in result["visuals"]
+        if v["image_id"] in media and not v.get("excluded_from_analysis")
+    ]
     return sources, media, visuals
 
 
@@ -114,7 +120,7 @@ def analyze_member(result, selected, cfg, cache_dir, progress=print):
             "changes最多3条，只写本时段实际变化，每条至少引用前后两个不同时间的本人证据；没有可靠变化则空数组，"
             "不把重复、没发言、转发或未再提及当成转向。watch最多3条，整理此人明确提出的条件或仍需验证的问题，不替他编交易计划。"
             "转发、引用回复和截图内他人的观点不自动属于发送者；明确区分本人说法与他人材料。买卖/持仓仅为本人自述，模拟盘必须标明。"
-            "技术图只用已识别内容；无日期或模糊图片不确认现价。生活闲聊不能当作市场立场。缺少实质市场观点时直接说明。"
+            "走势图只提供名称和代码，不能据图推断技术走势或本人立场。本人文字里的技术观点可转述并明确归属；生活图片和非行情截图仍按可见内容总结，生活闲聊不能当作市场立场。缺少实质市场观点时直接说明。"
             "每条sources只用所给T/I编号且非空；标题不超过22字，禁止在正文写成员编号/昵称，用‘本人’或直接陈述。"
             "limitations最多2条，说清当前资料边界，不把关注对象当成权威或默认跟单依据。\n资料="
             + json.dumps(payload, ensure_ascii=False)

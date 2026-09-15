@@ -182,13 +182,17 @@ def social_section(c, y, number, title, subtitle, items, result, replace, fill):
 def research_card(c, y, item):
     """Keep retrieved facts visibly separate from the adjacent chat opinions."""
     tech, news = item["technical"], item["news"]
-    rows = [("日线补查", tech["summary"])]
+    local = tech.get("source_kind") == "local"
+    rows = [("本地日线" if local else "日线补查", tech["summary"])]
     if tech.get("source"):
+        units = (
+            "价格单位：元；成交量仅作相对比值" if local else f"价格 {tech['price_unit']} / 成交量 {tech['volume_unit']}"
+        )
         rows.append(
             (
                 "行情口径",
                 f"{tech.get('instrument', item['lookup_name'])} · {tech['adjustment']} · "
-                f"价格 {tech['price_unit']} / 成交量 {tech['volume_unit']}；来源 {tech['source']}；"
+                f"{units}；来源 {tech['source']}；"
                 f"查询于 {tech['fetched_at'][:16].replace('T', ' ')}（北京时间）。",
             )
         )
@@ -210,14 +214,34 @@ def research_card(c, y, item):
             ("观察条件", item.get("watch", "等待资料核对后再评估。")),
         ]
     )
-    title = item["name"] + " · 外部资料与分析"
+    title = item["name"] + (" · 本地行情与分析" if local else " · 外部资料与分析")
     height = 80 + c.ph(title, 1024, 35, True) + sum(44 + c.ph(text, 1024, 30) + 22 for _, text in rows)
     c.card(y, height, "#EAF0F2")
     z = c.para(84, y + 26, title, 1024, 35, TEAL, True) + 26
     for label, text in rows:
         c.txt(84, z, label, 25, TEAL, True)
         z = c.para(84, z + 44, text, 1024, 30, INK) + 22
-    c.txt(84, y + height - 29, "外部依据 " + item["id"] + " · 来源链接及检索记录见附录", 21, MUTED)
+    c.txt(84, y + height - 29, "数据依据 " + item["id"] + " · 原始数据及来源记录见附录", 21, MUTED)
+    return y + height + 24
+
+
+def stock_opinions(c, y, stock, replace):
+    """Full-width discussion card; chart pixels are not technical evidence."""
+    rows = [
+        ("群内讨论", replace(stock["discussion"])),
+        ("分歧与证据缺口", replace(stock["disagreement"])),
+        ("群观点的验证条件", replace(stock["watch"])),
+    ]
+    title = stock["name"] + (" · " + stock["code"] if stock["code"] else "")
+    height = 80 + c.ph(title, 1024, 42, True) + c.ph(stock["angle"], 1024, 31)
+    height += sum(44 + c.ph(text, 1024, 33) + 24 for _, text in rows) + 38
+    c.card(y, height)
+    z = c.para(84, y + 28, title, 1024, 42, INK, True) + 18
+    z = c.para(84, z, stock["angle"], 1024, 31, TEAL, True) + 24
+    for label, text in rows:
+        c.txt(84, z, label, 25, TEAL, True)
+        z = c.para(84, z + 44, text, 1024, 33) + 24
+    c.txt(84, y + height - 32, "群友说法待核验；走势图仅用于识别标的", 23, MUTED)
     return y + height + 24
 
 
@@ -286,6 +310,7 @@ def render(result, output):
     media = {m["id"]: m for m in result["media"]}
     research = result.get("market_research", {})
     research_items = research.get("cards", [])
+    identity_only = result.get("chart_policy") == "identity_only"
     asof = result["as_of"][11:16]
     hour = int(asof[:2])
     edition = (
@@ -349,11 +374,21 @@ def render(result, output):
         y,
         "03",
         "重点标的 · 群观点与依据",
-        "截图只代表图中时点；外部补查单独标注数据日期与来源。"
+        "走势图只识别标的；技术分析依据行情数据，注明日期与来源。"
+        if identity_only
+        else "截图只代表图中时点；外部补查单独标注数据日期与来源。"
         if research_items
         else "截图只代表图中时点；观察条件用于检验群观点。",
     )
     for n, stock in enumerate(r["stocks"], 1):
+        if identity_only:
+            y = stock_opinions(c, y, stock, replace)
+            matched = [item for item in research_items if item.get("stock_name") == stock["name"]]
+            for item in matched:
+                y = research_card(c, y, item)
+            if not matched:
+                y = c.para(84, y, "尚无本地日线分析结果；不依据走势图推断技术走势。", 1024, 29, MUTED) + 28
+            continue
         discussion, chart, disagreement, watch = (
             replace(stock[k]) for k in ("discussion", "chart", "disagreement", "watch")
         )
@@ -413,7 +448,8 @@ def render(result, output):
     extras = [
         m
         for iid, m in media.items()
-        if iid in extra_ids - used_ids
+        if not identity_only
+        and iid in extra_ids - used_ids
         and m.get("image")
         and not m["image"]["thumbnail"]
         and visuals[iid]["kind"] == "chart"
@@ -504,9 +540,9 @@ def render(result, output):
         y = c.para(64, y + 12, replace(limitation), 1072, 26, MUTED)
     if research.get("status") not in (None, "disabled"):
         note = (
-            "外部补查："
+            ("本地行情分析：" if research.get("technical_source") == "local" else "外部补查：")
             + research.get("checked_at", "")[:16].replace("T", " ")
-            + "（北京时间）。群聊观点与外部数据分开呈现；仅补查列出的标的和资料，不代表全部说法已核验。"
+            + "（北京时间）。群聊观点与数据依据分开呈现；仅覆盖列出的标的和资料，不代表全部说法已核验。"
         )
         if research.get("status") == "partial":
             note += "部分资料或解读未完成，以卡片缺失标记为准。"
@@ -556,7 +592,7 @@ def render(result, output):
                     + "</p>"
                 )
     for item in research_items:
-        audit.append(f"<h2 id='{item['id']}'>{html.escape(item['name'])} · 外部补查</h2>")
+        audit.append(f"<h2 id='{item['id']}'>{html.escape(item['name'])} · 数据依据</h2>")
         audit.append("<p>触发依据：" + html.escape(item["source"] + " · " + item["quote"]) + "</p>")
         tech = item["technical"]
         if tech.get("raw"):

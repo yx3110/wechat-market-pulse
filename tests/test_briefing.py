@@ -271,7 +271,7 @@ class BriefTests(unittest.TestCase):
                 )
             self.assertEqual(model.call_count, 1)
             self.assertEqual(model.call_args.kwargs["images"], [media[1]["image"]["path"]])
-            self.assertEqual(result[0]["observations"], ["旧简述"])
+            self.assertEqual(result[0]["observations"], [])
             self.assertEqual(result[1]["observations"], ["生活主体与可见细节"])
             self.assertEqual(again, result)
 

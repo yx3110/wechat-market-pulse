@@ -20,8 +20,9 @@ from .core import ROOT, TZ, config, now, period_at, digest
 from .media import resolve_images
 
 VERSION = "holistic-vision-v1"
-CONTEXT_VISION_VERSION = "holistic-context-images-v2"
-BRIEF_VERSION = "holistic-portable-v9"
+CONTEXT_VISION_VERSION = "holistic-identity-images-v3"
+BRIEF_VERSION = "holistic-portable-v10"
+CHART_POLICY = "identity_only"
 
 ADVICE_REFERENCES = [
     {
@@ -102,8 +103,7 @@ VISION_PROMPT = """你在为股票微信群制作综合简报，先读取附图�
 先区分走势图、持仓（可能模拟盘）、市场新闻、聊天截图、非市场图片。生活照、食物、数码用品、游戏、学术、文化、非财经社会新闻及表情包归other，不强行找股票。
 生活或非市场图也要认真分析：描述清楚可见的主体、场景、文字主题及与话题相关的细节；最多3条observations。区分实物照、商品页、转发新闻、段子，不能凭图片确认发送者本人拍摄、购买、食用、拥有或亲历。
 不识别人脸身份，不推断健康、精确位置或个人敏感属性；不抄录手机号、地址、订单号、证件号码、车牌。若图中有这类信息或其他人的私人聊天，caveats注明不宜直接配图。非财经新闻中的事件、商业案例只作为图中文字陈述，不写成已核验事实。
-走势图：只识别清楚的股票/板块名、代码、选中周期、日期/时间、走势和可见量价关系。缩略图看不清的名称/数字保持空或不确定，不根据上下文强行认股。
-特别注意十字光标/历史选中日期：顶栏报价和MA/KDJ可能属于光标时点，不等于最右侧K线或当前行情。若看到过去日期选中，必须写进 caveats，不能混用价格做当日支撑压力。截图发送时间也不等于行情时间。
+走势图（包括股票、指数、商品、分时图和带走势的混合截图）：只识别清楚的标的名称和代码，保持一一对应的原文，不根据上下文猜测名称。不读取价格、涨跌、周期、时间、均线、量价关系或技术形态；period和visible_time留空，observations=[]。技术分析由后续本地行情数据计算完成。
 不声称截图真实可靠，不验证公司基本面，不推断成交、主力意图或保证未来涨跌。
 每张最多3条 observations，每条不超过65字；最多2条 caveats。相邻文字只帮助理解，图上看不到的不要写成图片证据。缩略图看不清则保留不确定，不扩写故事。
 """
@@ -115,12 +115,12 @@ headline: 18字内有洞见的标题；thesis: 80字内说明本时段核心变�
 timeline: 3项，每项title是时段+情绪变化，text不超过55字。
 themes: 3项有证据的主线，每项text不超过75字。
 stocks: 选择讨论实质最多、有图文证据或明显分歧的5至6只个股。每只angle<=16字、discussion<=90字（自然指出哪些成员怎么看，引用成员别名）、chart<=85字、disagreement<=65字、watch<=65字。要有综合判断，别把一句口号扩写成基本面逻辑。
-chart 是截图可见现象并解释它怎样支持或限制群观点，不编支撑位/目标价。历史光标数据不得写成当日行情；缺乏清晰图就说明，不拿别的股票图替代。image_ids仅选同一股票明确可辨的最佳1张。
+chart 留空，技术分析由后续本地日线模块完成。走势图仅是标的名称/代码的识别依据，不能在任何部分由图片推断走势、价格、均线、量价、支撑压力或涨跌；群友明确说出的技术观点可以归纳但必须标为群友说法。image_ids仅选同一股票明确可辨的最佳1张，用于追溯名称识别。
 若 image_ids 非空，必须 kind=chart，stock.name 必须逐字等于该图 names 数组中的一项，非空 stock.code 必须逐字等于 codes 中一项；不要在 name/code 添加“图示”、括号或合并多个名字，这些限定写入 chart。没有精确匹配时 image_ids=[]。
 disagreement 写实质分歧/证据缺口，不要机械重复'有风险'。watch 是检验群观点的观察条件，不是建议买卖。
 成员的买卖、持仓、催化、传闻都是成员说法，不得变成已核实事实。模拟盘必须标明。截图中的消息/旧聊天不等于独立验证或今天新观点。
 转发回群的本项目AI简报不能作为新增独立依据，不能将二次总结重新计作群内共识。
-other_mentions: 3至7项，每项text<=65字，覆盖主要但材料较薄的股票或板块；清晰图片中出现但未进重点卡片的股票也要有简短图形结论，可合并相关标的。手机价格等闲聊不应挤占个股解析。
+other_mentions: 3至7项，每项text<=65字，覆盖主要但材料较薄的股票或板块；走势图中出现但未进重点卡片的标的仅说明被分享/提及，不作图形结论，可合并相关标的。手机价格等闲聊不应挤占个股解析。
 next_watch: 3项，综合下午/下一时段验证事项，每项text<=65字。
 life: 0至3个生活图文话题，整合吃饭、出行、日常物件、消费体验等生活图片与相关聊天。每项title<=18字，summary<=110字，用成员别名说明谁分享了什么、群友如何回应；有真实图文关联才合并。不能仅凭生活图推断拍摄者本人经历、购买或精确位置。
 off_topic: 0至3个与股市无关且有实质内容的话题，例如学术、科技/AI使用、游戏/文化或社会事件。每项title<=18字，summary<=110字，综合主张、回应与分歧。新闻和商业案例标为转述，调侃不能当事实。与股票有关的段子仍放股市部分；纯复读不单列，不把生活闲聊用来判定看多看空。
@@ -253,6 +253,19 @@ def refresh_attributions(result, records):
     return changes
 
 
+def identity_visual(visual):
+    """A hard boundary for cached and new chart output, before any model sees it."""
+    if visual["kind"] != "chart":
+        return visual
+    return {
+        **visual,
+        "period": "",
+        "visible_time": "",
+        "observations": [],
+        "caveats": ["走势图仅识别标的名称和代码；技术分析使用本地日线数据。"],
+    }
+
+
 def analyze_images(media, records, cache_dir, cfg, progress=print):
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -280,10 +293,14 @@ def analyze_images(media, records, cache_dir, cfg, progress=print):
         image_sha = hashlib.sha256(Path(item["image"]["path"]).read_bytes()).hexdigest()
         cache = cache_dir / (CONTEXT_VISION_VERSION + "-" + backend_hash + "-" + image_sha[:24] + ".json")
         legacy_cache = cache_dir / (VERSION + "-" + image_sha[:24] + ".json")
-        legacy_context = cache_dir / (CONTEXT_VISION_VERSION + "-" + image_sha[:24] + ".json")
+        old_version = "holistic-context-images-v2"
+        legacy_context = cache_dir / (old_version + "-" + image_sha[:24] + ".json")
+        old_backend = cache_dir / (old_version + "-" + backend_hash + "-" + image_sha[:24] + ".json")
         found = None
         if cache.exists():
             found = Visual.model_validate(json.loads(cache.read_text(encoding="utf-8"))).model_dump()
+        elif old_backend.exists():
+            found = Visual.model_validate(json.loads(old_backend.read_text(encoding="utf-8"))).model_dump()
         elif cfg.get("reuse_legacy_codex_cache") and backend.get("provider") == "codex" and legacy_context.exists():
             found = Visual.model_validate(json.loads(legacy_context.read_text(encoding="utf-8"))).model_dump()
         elif cfg.get("reuse_legacy_codex_cache") and backend.get("provider") == "codex" and legacy_cache.exists():
@@ -292,6 +309,8 @@ def analyze_images(media, records, cache_dir, cfg, progress=print):
                 found = prior
         if found is not None:
             found["image_id"] = item["id"]
+            found = identity_visual(found)
+            save_json(cache, found)
             results.append(found)
         else:
             pending.append((item, cache))
@@ -320,8 +339,9 @@ def analyze_images(media, records, cache_dir, cfg, progress=print):
         if len(ids) != len(set(ids)) or set(ids) != set(expected):
             raise ValueError("图片识别 ID 不完整或重复，未发布结果")
         for item in parsed.images:
-            save_json(expected[item.image_id], item.model_dump())
-            results.append(item.model_dump())
+            visual = identity_visual(item.model_dump())
+            save_json(expected[item.image_id], visual)
+            results.append(visual)
     return sorted(results, key=lambda r: r["image_id"])
 
 
@@ -421,6 +441,7 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
         json.dumps(
             {
                 "version": BRIEF_VERSION,
+                "chart_policy": CHART_POLICY,
                 "model": model_identity(cfg),
                 "focus_members": [(m["group_id"], m["sender_id"]) for m in selections(cfg, set(group_ids))],
                 "records": [(r["id"], r.get("participant_id"), r.get("content"), r.get("text")) for r in records],
@@ -506,8 +527,11 @@ def _generate(date, group_id, cfg, output_dir=None, refresh=True, progress=print
             method = "rules-fallback"
     save_json(work / "briefing-candidate.json", data)
     content = validate_brief(data, sources, visuals, groups, people.values())
+    for stock in content["stocks"]:
+        stock["chart"] = ""
     result = {
         "version": BRIEF_VERSION,
+        "chart_policy": CHART_POLICY,
         "input_fingerprint": fingerprint,
         "date": date,
         "generated_at": now(),

@@ -23,6 +23,7 @@ macOS 在仓库根目录执行 `bash scripts/install-macos.sh`；Windows 执行 
 7. 指定日期、时段与群生成报告。检查 `coverage`、`analysis_method`、缺图标记与来源，再打开 PNG/HTML核对排版。
 8. 用户启用标的补查时阅读 [MARKET_RESEARCH.md](MARKET_RESEARCH.md)，在现有私有配置添加 `market_research`。保留密钥与离线偏好，核对 `market_research.status` 和各标的资料缺失标记；不要把补查完成说成所有群聊说法已核实。
 9. 用户指定重点成员时阅读 [FOCUS_MEMBERS.md](FOCUS_MEMBERS.md)，用 `members --group-id ... --search ...` 核对群内稳定身份，再写入 `focus_members`。不要按昵称持续匹配或自动关注别的群；多个同名结果必须确认，没发言时如实标记。
+10. 用户选择本地行情时阅读 [LOCAL_MARKET.md](LOCAL_MARKET.md)，只读核对数据源后设置 `local_market`；行情缺失不回退到截图。走势图只识别名称和代码，生活及其他非行情图片继续分析。规则模式也能计算本地指标。保留一群一图或多群合并的既有选择。
 
 ## 命令接口
 
