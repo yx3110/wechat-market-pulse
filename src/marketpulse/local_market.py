@@ -278,7 +278,7 @@ def enrich(result, cfg, cache, progress=print):
         try:
             assess(report["cards"], result, cfg)
         except (RuntimeError, ValueError, OSError, TypeError, KeyError):
-            report["error"] = "模型解读未完成，保留已计算的本地日线指标和数据缺口。"
+            report["error"] = "未完成模型研判的标的已采用本地脚本的条件判断。"
     report["status"] = (
         "partial"
         if report.get("error")

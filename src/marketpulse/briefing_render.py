@@ -598,7 +598,9 @@ def render(result, output):
             + research.get("checked_at", "")[:16].replace("T", " ")
             + "（北京时间）。群聊观点与数据依据分开呈现；仅覆盖列出的标的和资料，不代表全部说法已核验。"
         )
-        if research.get("error") or any(item.get("news", {}).get("status") == "unavailable" for item in research_items):
+        if research.get("technical_source") != "local" and any(
+            item.get("news", {}).get("status") == "unavailable" for item in research_items
+        ):
             note += "部分资料或解读未完成，以卡片缺失标记为准。"
         if research.get("error"):
             note += research["error"]
