@@ -181,9 +181,22 @@ def social_section(c, y, number, title, subtitle, items, result, replace, fill):
 
 def research_card(c, y, item):
     """Keep retrieved facts visibly separate from the adjacent chat opinions."""
+    if item.get("analysis") and item["technical"].get("source_kind") == "local":
+        return conclusion_card(c, y, item)
     tech, news = item["technical"], item["news"]
     local = tech.get("source_kind") == "local"
-    rows = [("本地日线" if local else "日线补查", tech["summary"])]
+    identity = item.get("identity", {})
+    rows = []
+    if identity.get("status") in ("contextual", "configured"):
+        rows.append(
+            (
+                "简称对应 · 按上下文推定" if identity["status"] == "contextual" else "简称对应 · 已配置",
+                f"{item['name']} → {identity['canonical_name']}（{identity['code']}，{identity['market']}）。"
+                + identity["reason"]
+                + " 本次日线采用上述A股；不代表群友已确认股份类别。",
+            )
+        )
+    rows.append(("本地日线" if local else "日线补查", tech["summary"]))
     if tech.get("source"):
         units = (
             "价格单位：元；成交量仅作相对比值" if local else f"价格 {tech['price_unit']} / 成交量 {tech['volume_unit']}"
@@ -222,6 +235,40 @@ def research_card(c, y, item):
         c.txt(84, z, label, 25, TEAL, True)
         z = c.para(84, z + 44, text, 1024, 30, INK) + 22
     c.txt(84, y + height - 29, "数据依据 " + item["id"] + " · 原始数据及来源记录见附录", 21, MUTED)
+    return y + height + 24
+
+
+def conclusion_card(c, y, item):
+    analysis, identity = item["analysis"], item.get("identity", {})
+    rows = [("结论", analysis["conclusion"]), ("技术面 · 数据意味着什么", analysis["technical_view"])]
+    if analysis.get("fundamental_view"):
+        rows.append(("基本面 · 增长与质量", analysis["fundamental_view"]))
+    if analysis.get("news_view"):
+        rows.append(("消息影响", analysis["news_view"]))
+    rows.append(("后续判断条件", analysis["watch"]))
+    if identity.get("status") in ("contextual", "configured"):
+        rows.append(
+            (
+                "简称对应" + (" · 按上下文推定" if identity["status"] == "contextual" else " · 已配置"),
+                f"{item['name']} → {identity['canonical_name']}（{identity['code']}，A股）。" + identity["reason"],
+            )
+        )
+    daily = item["technical"]
+    dates = "日线 " + daily["metrics"]["as_of"] + " · 本地前复权"
+    financials = item.get("fundamentals", {}).get("financials", {})
+    if financials:
+        dates += "；财务期末 " + financials["period_end"] + "，公告 " + financials["announced"]
+    rows.append(("数据口径", dates + "。完整指标、公告及判断来源见附录。"))
+    title = item["lookup_name"] + " · 综合研判"
+    height = (
+        80 + c.ph(title, 1024, 35, True) + sum(44 + c.ph(text, 1024, 30, label == "结论") + 22 for label, text in rows)
+    )
+    c.card(y, height, "#E6EEE9")
+    z = c.para(84, y + 26, title, 1024, 35, TEAL, True) + 26
+    for label, text in rows:
+        c.txt(84, z, label, 25, TEAL, True)
+        z = c.para(84, z + 44, text, 1024, 30, INK, label == "结论") + 22
+    c.txt(84, y + height - 29, "数据依据 " + item["id"] + " · 分析判断非收益承诺", 21, MUTED)
     return y + height + 24
 
 
@@ -294,6 +341,15 @@ def focus_section(c, y, result):
     return y + 18
 
 
+def visible_research(research):
+    """No empty/stale local-price cards in the shared report; audit stays intact."""
+    return [
+        item
+        for item in research.get("cards", [])
+        if item.get("technical", {}).get("source_kind") != "local" or item["technical"]["status"] == "available"
+    ]
+
+
 def render(result, output):
     out = Path(output)
     out.mkdir(parents=True, exist_ok=True)
@@ -309,7 +365,7 @@ def render(result, output):
     visuals = {v["image_id"]: v for v in result["visuals"]}
     media = {m["id"]: m for m in result["media"]}
     research = result.get("market_research", {})
-    research_items = research.get("cards", [])
+    research_items = visible_research(research)
     identity_only = result.get("chart_policy") == "identity_only"
     asof = result["as_of"][11:16]
     hour = int(asof[:2])
@@ -386,8 +442,6 @@ def render(result, output):
             matched = [item for item in research_items if item.get("stock_name") == stock["name"]]
             for item in matched:
                 y = research_card(c, y, item)
-            if not matched:
-                y = c.para(84, y, "尚无本地日线分析结果；不依据走势图推断技术走势。", 1024, 29, MUTED) + 28
             continue
         discussion, chart, disagreement, watch = (
             replace(stock[k]) for k in ("discussion", "chart", "disagreement", "watch")
@@ -544,7 +598,7 @@ def render(result, output):
             + research.get("checked_at", "")[:16].replace("T", " ")
             + "（北京时间）。群聊观点与数据依据分开呈现；仅覆盖列出的标的和资料，不代表全部说法已核验。"
         )
-        if research.get("status") == "partial":
+        if research.get("error") or any(item.get("news", {}).get("status") == "unavailable" for item in research_items):
             note += "部分资料或解读未完成，以卡片缺失标记为准。"
         if research.get("error"):
             note += research["error"]
@@ -591,9 +645,30 @@ def render(result, output):
                     + links
                     + "</p>"
                 )
-    for item in research_items:
+    for item in research.get("cards", []):
         audit.append(f"<h2 id='{item['id']}'>{html.escape(item['name'])} · 数据依据</h2>")
         audit.append("<p>触发依据：" + html.escape(item["source"] + " · " + item["quote"]) + "</p>")
+        if item.get("identity"):
+            identity = item["identity"]
+            links = " / ".join(
+                f"<a href='#{html.escape(sid, quote=True)}'>{html.escape(sid)}</a>"
+                for sid in identity.get("sources", [])
+            )
+            audit.append(
+                "<p>证券身份与判断依据："
+                + html.escape(json.dumps(identity, ensure_ascii=False))
+                + "<br>"
+                + links
+                + "</p>"
+            )
+        if item.get("fundamentals", {}).get("status") == "available":
+            audit.append(
+                f"<h3 id='{item['id']}F'>本地财务与估值依据</h3><pre>"
+                + html.escape(json.dumps(item["fundamentals"], ensure_ascii=False, indent=2))
+                + "</pre>"
+            )
+        if item.get("analysis"):
+            audit.append("<p>综合研判：" + html.escape(json.dumps(item["analysis"], ensure_ascii=False)) + "</p>")
         tech = item["technical"]
         if tech.get("raw"):
             from .research import safe_url

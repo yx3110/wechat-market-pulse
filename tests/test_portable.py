@@ -19,6 +19,24 @@ from marketpulse.models import call_model, validate_endpoint, model_identity
 from marketpulse.reduction import reduce_payload
 
 
+def test_manual_report_requires_group_choice_and_respects_it(tmp_path):
+    import pytest
+    from marketpulse.cli import parser, run
+
+    cfg = dict(provider="rules", groups=["fictional-alpha@chatroom", "fictional-beta@chatroom"])
+    report = dict(as_of="2026-01-05T15:00:00+08:00", analysis_method="rules", coverage={})
+    with (
+        patch("marketpulse.core.config", return_value=cfg),
+        patch("marketpulse.briefing.generate", return_value=(report, tmp_path)) as generate_report,
+        patch("marketpulse.briefing_render.render", return_value=tmp_path / "report.png"),
+    ):
+        with pytest.raises(ValueError, match="--group-id"):
+            run(parser().parse_args(["report"]))
+        generate_report.assert_not_called()
+        run(parser().parse_args(["report", "--group-id", "fictional-beta@chatroom"]))
+        assert generate_report.call_args.args[1] == ["fictional-beta@chatroom"]
+
+
 def test_rules_multi_group_is_offline_and_keeps_group_nicknames(tmp_path):
     source = tmp_path / "messages.jsonl"
     source.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records()), encoding="utf-8")

@@ -16,7 +16,7 @@ import sqlite3
 
 from .core import digest, now
 
-VERSION = "local-daily-v1"
+VERSION = "local-daily-v3"
 
 
 def enabled(cfg):
@@ -60,7 +60,12 @@ def connection(cfg):
 
 
 def securities(conn):
-    return [dict(r) for r in conn.execute("SELECT id,code,name,type,exchange FROM securities WHERE type='A股'")]
+    fields = {r[1] for r in conn.execute("PRAGMA table_info(securities)")}
+    industry = ",industry" if "industry" in fields else ""
+    return [
+        dict(r)
+        for r in conn.execute("SELECT id,code,name,type,exchange" + industry + " FROM securities WHERE type='A股'")
+    ]
 
 
 def resolve(name, code, catalog, cfg):
@@ -97,17 +102,17 @@ def select_targets(result, cfg, limit=12):
     """Prefer report stocks, then literal mentions in cited market material.
 
     Do not infer a listed company from life photos, products, or uncited prose.
-    A failed lookup remains an explicit card for an already selected stock.
+    Failed lookups remain in the private audit, outside the rendered analysis.
     """
-    from .research import evidence_catalog
+    from .instrument_identity import market_evidence
 
-    evidence = evidence_catalog(result)
+    evidence = market_evidence(result)
     stocks = result["content"]["stocks"]
     try:
         with connection(cfg) as conn:
             catalog = securities(conn)
     except (ValueError, OSError, sqlite3.Error):
-        catalog = []  # Still show each primary stock's explicit local-data gap.
+        catalog = []  # Retain primary stocks for the private lookup audit.
     targets, seen, by_name, verified = [], set(), {}, set()
 
     def add(name, code, sid, stock_name=""):
@@ -163,7 +168,7 @@ def select_targets(result, cfg, limit=12):
                 add(stock["name"], code, sid, stock["name"])
                 break
         else:
-            # Keep the data gap visible without querying for an inferred identity.
+            # Audit the gap without querying for an unverified identity.
             sid = stock["sources"][0]
             by_name[stock["name"]] = len(targets)
             targets.append(
@@ -203,6 +208,9 @@ def select_targets(result, cfg, limit=12):
 
 def enrich(result, cfg, cache, progress=print):
     from .research import Gateway, assess, news, options
+    from .instrument_identity import expand_targets
+    from .fundamentals import read as read_fundamentals
+    from .investment_analysis import scripted
 
     opt = options(cfg)
     report = {
@@ -219,12 +227,27 @@ def enrich(result, cfg, cache, progress=print):
             gateway = Gateway(opt, cache)
         except (RuntimeError, OSError, ValueError):
             news_error = "外部消息面服务不可用；本地日线分析照常保留。"
-    targets = select_targets(result, cfg, opt["max_targets"])
+    targets = select_targets(result, cfg, 60)
+    try:
+        with connection(cfg) as conn:
+            catalog = securities(conn)
+    except (ValueError, OSError, sqlite3.Error):
+        catalog = []
+    progress("结合群内上下文解析证券简称……", flush=True)
+    targets = expand_targets(result, cfg, targets, catalog, cache)[: opt["max_targets"]]
     for i, target in enumerate(targets, 1):
         progress(f"本地日线 {i}/{len(targets)}：{target['name']}", flush=True)
         daily = technical(target, result["as_of"], cfg)
+        fundamental = read_fundamentals(target, daily, cfg)
         recent = {"status": "unavailable" if opt["enabled"] else "disabled", "items": [], "summary": news_error}
-        if gateway and not target.get("identity_unverified"):
+        identity = target.get("identity", {})
+        if identity.get("status") == "unresolved":
+            recent = {
+                "status": "empty",
+                "items": [],
+                "summary": "先区分公司身份，再检索该主体的公告，避免混用同名公司的消息。",
+            }
+        if gateway and not target.get("identity_unverified") and identity.get("status") != "unresolved":
             try:
                 recent = news(target, result["as_of"], gateway, opt)
             except (RuntimeError, ValueError, OSError, TypeError, KeyError):
@@ -235,13 +258,19 @@ def enrich(result, cfg, cache, progress=print):
                 **target,
                 "id": f"E{i:02}",
                 "technical": daily,
+                "fundamentals": fundamental,
+                "analysis": scripted(daily, fundamental),
                 "news": recent,
                 "evidence_ids": refs,
                 "interpretation": "日线指标由本地脚本计算；群友观点需结合数据日期独立核验。"
                 if refs
-                else "本地行情不足，暂不作技术走势判断。",
+                else identity["reason"]
+                if identity.get("status") in ("unresolved", "unsupported", "catalog_unavailable")
+                else "本地日线不足或未通过校验，具体原因见日线资料说明。",
                 "watch": "观察后续交易日价格与MA20、成交量的变化；历史区间不保证构成支撑或压力。"
                 if daily["status"] == "available"
+                else "先核对简称对应公司及市场，再查询日线。"
+                if identity.get("status") == "unresolved"
                 else "等待可核对的最新本地日线。",
             }
         )
@@ -268,8 +297,17 @@ def technical(target, as_of, cfg):
     try:
         if target.get("identity_unverified"):
             raise ValueError("标的名称没有可核对的原文或图片识别依据，暂不匹配本地行情。")
+        identity = target.get("identity", {})
+        if identity.get("status") in ("unresolved", "unsupported"):
+            return {
+                "status": "identity_unresolved" if identity["status"] == "unresolved" else "unsupported_instrument",
+                "source_kind": "local",
+                "summary": identity["reason"],
+            }
         with connection(cfg) as conn:
-            security = resolve(target["name"], target.get("code", ""), securities(conn), cfg)
+            security = resolve(
+                identity.get("canonical_name", target["name"]), target.get("code", ""), securities(conn), cfg
+            )
             cutoff = cutoff_day(as_of, {"kind": "equity", "code": security["code"]}, "A股财务行情数据库")
             latest_market = conn.execute(
                 "SELECT MAX(trade_date) FROM daily_quotes WHERE trade_date<=?", (cutoff,)

@@ -235,6 +235,8 @@ def run(args):
     if args.input:
         cfg["input"] = str(Path(args.input).expanduser().resolve())
     gids = args.group_id or [g.get("bulk_group_id") if isinstance(g, dict) else g for g in cfg.get("groups", [])]
+    if args.command == "report" and not args.group_id and not cfg.get("input") and len(gids) > 1:
+        raise ValueError("已配置多个群，请用 --group-id 指定本次要生成的群；手动生成不会自动运行全部群。")
     date = args.date or datetime.now(TZ).date().isoformat()
     if args.command in ("watch", "start"):
         from .watch import watch, start
